@@ -187,9 +187,28 @@ def equity() -> float:
     return round(state["balance"] + pnl, 2)
 
 
+def performance() -> dict[str, Any]:
+    """Realized paper P&L only; open-position P&L is excluded from win rate."""
+    trades = state["trades"]
+    wins = sum(1 for trade in trades if trade["pnl"] > 0)
+    losses = sum(1 for trade in trades if trade["pnl"] < 0)
+    realized = round(sum(trade["pnl"] for trade in trades), 2)
+    return {
+        "closed_trades": len(trades),
+        "wins": wins,
+        "losses": losses,
+        "win_rate_pct": round(100 * wins / len(trades), 2) if trades else 0.0,
+        "realized_pnl": realized,
+        "unrealized_pnl": round(equity() - state["balance"], 2),
+        "net_pnl": round(equity() - state["starting_balance"], 2),
+    }
+
+
 def snapshot() -> dict[str, Any]:
     return {
         "automation": agents.options(),
+        "performance": performance(),
+        "price_history": {pair: values[-120:] for pair, values in state.get("history", {}).items() if pair in ("EURUSD", "GBPUSD")},
         "strategy_diagnostics": agents.diagnostics(state),
         "signals": state.get("signals", [])[-20:][::-1],
         "mode": "PAPER",

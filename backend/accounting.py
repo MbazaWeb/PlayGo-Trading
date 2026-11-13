@@ -73,6 +73,10 @@ def post(collection: Collection, journals: Collection, *, transaction_id: str,
         raise ValueError("Invalid transaction ID")
     if not isinstance(reference, str) or len(reference) > 256:
         raise ValueError("Invalid reference")
+    if kind in ("REALIZED_GAIN", "REALIZED_LOSS") and not (
+        transaction_id.startswith("TRADE:") and reference == "CLOSED:" + transaction_id[6:]
+    ):
+        raise ValueError("Realized P&L requires a matching trade settlement reference")
     if kind == "REVERSAL":
         original = journals.find_one({"_id": reference})
         if not original or original.get("account_id") != ACCOUNT_ID:
@@ -112,13 +116,18 @@ def post(collection: Collection, journals: Collection, *, transaction_id: str,
                 )
                 if result.matched_count != 1:
                     raise LedgerConflict("Account revision changed; retry transaction")
-                if kind == "REVERSAL" and journals.find_one(
-                    {"account_id": ACCOUNT_ID, "kind": "REVERSAL", "reference": reference},
-                    session=session,
-                ):
-                    raise LedgerConflict("Original transaction already reversed")
+                if kind == "REVERSAL":
+                    journals.insert_one({
+                        "_id": "REVERSAL_CLAIM:" + reference,
+                        "account_id": ACCOUNT_ID, "kind": "REVERSAL_CLAIM",
+                        "reference": reference, "amount_cents": 0,
+                        "lines": [], "created_at": record["created_at"],
+                    }, session=session)
                 journals.insert_one(record, session=session)
     except DuplicateKeyError:
+        if kind == "REVERSAL" and journals.find_one({"_id": "REVERSAL_CLAIM:" + reference}):
+            if not journals.find_one({"_id": transaction_id}):
+                raise LedgerConflict("Original transaction already reversed")
         existing = journals.find_one({"_id": transaction_id})
         if existing and (existing["kind"], existing["amount_cents"], existing["reference"]) == (kind, amount_cents, reference):
             return public_journal(existing)
@@ -142,6 +151,8 @@ def reconcile(collection: Collection, journals: Collection) -> dict[str, Any]:
     problems: list[str] = []
     count = 0
     for row in journals.find({"account_id": ACCOUNT_ID}).sort("_id", 1):
+        if row.get("kind") == "REVERSAL_CLAIM":
+            continue
         count += 1
         try:
             lines = row["lines"]

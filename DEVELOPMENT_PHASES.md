@@ -118,3 +118,13 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - `.github/workflows/backend-tests.yml` runs backend unittest discovery on GitHub Actions after relevant commits. Integration tests require disposable MongoDB credentials and skip when absent. CI execution/results have not been verified.
 - No deployment initiated. Public frontend API connectivity is intentionally blocked until a proper authenticated, tenant-isolated backend is implemented.
 - Next: implement per-user identity with server-side JWT verification and per-account document scoping; migrate the legacy shared state only after explicit review.
+
+## Identity foundation — development-only isolated paper accounts
+- Added `backend/identity.py` with PBKDF2-HMAC-SHA256 password hashing, random opaque 8-hour bearer sessions (only token SHA-256 hashes stored), session revocation and independent zero-balance per-user paper account documents.
+- Added localhost-only `POST /api/identity/register`, `POST /api/identity/login`, `POST /api/identity/logout`, and `GET /api/identity/me/paper-account`.
+- MongoDB unique username and user ID indexes, and TTL expiry index for session documents, are initialized on backend startup.
+- Added `backend/test_identity.py` covering user separation, credential rejection, duplicate usernames, and logout. Test execution is not yet verified.
+- **Not production authentication:** registration has no email verification, rate limits, MFA, session rotation, account recovery or independent security review. Never expose this development identity subsystem publicly.
+- **Critical separation:** the legacy `/api/status`, trading routes, demo orders and accounting endpoints still use shared global state and are NOT per-user scoped. The new isolated accounts are deliberately read-only and start at zero. No automatic migration, and no real-money functionality.
+- Existing remote API restrictions remain; the new identity routes are localhost-only under the existing policy. No deployment initiated.
+- Next: refactor all trading/accounting persistence to require verified user identity and tenant-scoped queries, then implement a reviewed legacy migration and end-to-end database isolation tests.

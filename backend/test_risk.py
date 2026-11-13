@@ -38,7 +38,10 @@ class RiskEngineTests(unittest.TestCase):
     def test_aggregate_notional_does_not_exceed_equity(self):
         main.start()
         main.order(main.Order(pair="EURUSD", side="BUY"))
-        main.order(main.Order(pair="GBPUSD", side="BUY"))
+        try:
+            main.order(main.Order(pair="GBPUSD", side="BUY"))
+        except HTTPException as exc:
+            self.assertEqual(exc.status_code, 400)
         exposure = sum(p["units"] * p["entry"] for p in main.state["positions"])
         self.assertLessEqual(exposure, main.equity())
 

@@ -35,3 +35,18 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 2. Existing README has obsolete branch and manual-only instructions; treat this roadmap and code as the current phase description.
 3. API is not publicly deployable. Read endpoints currently expose the shared paper account without user auth.
 4. No live broker order adapter exists or is authorized.
+
+## Phase 6 — Regulated broker research and real-money readiness (future; NOT authorized)
+- Select a broker based on licensing, jurisdiction, client-money segregation, available instruments, API terms, order types, minimum trade size, and withdrawal requirements.
+- Implement a separate demo-only broker execution adapter with idempotent order IDs, execution reconciliation, spread/slippage modeling, and kill switches.
+- Require an independently audited event ledger, user authentication, capital limits, loss caps, emergency stop, and full order lifecycle monitoring.
+- Validate a sufficiently long forward-testing period with real broker demo data and out-of-sample research; no fixed minute/hour/day/week/month profit promise.
+- Before any live execution, perform legal/regulatory review for the user's jurisdiction and obtain explicit authorization for broker, account, instrument, capital allocation and risk budget.
+- Live order routing remains absent and disabled until these gates are met. No environment variable can bypass the restriction.
+
+## Phase 3 backend update (November 2026)
+- Added `backend/broker.py`: broker interface and fail-closed paper-only capabilities.
+- Added `backend/periods.py`: UTC calendar minute/hour/day/week/month realized paper P&L reporting.
+- Added read-only `/api/broker/capabilities` and `/api/analytics/periods`.
+- Added unit tests; execution deferred.
+- No deployment requested or initiated in this backend milestone.

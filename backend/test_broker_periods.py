@@ -16,7 +16,7 @@ class BrokerSafetyTests(unittest.TestCase):
     def test_period_boundaries_and_legacy_trades(self):
         now = datetime(2026, 11, 13, 12, 30, tzinfo=timezone.utc)
         trades = [
-            {"closed_at": "2026-11-13T12:30:05+00:00", "pnl": 5},
+            {"closed_at": "2026-11-13T12:30:00+00:00", "pnl": 5},
             {"closed_at": "2026-11-13T11:55:00+00:00", "pnl": -2},
             {"closed_at": "2026-11-12T15:00:00+00:00", "pnl": 10},
             {"pnl": 1000},

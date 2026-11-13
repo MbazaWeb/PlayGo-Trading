@@ -8,6 +8,8 @@ from pathlib import Path
 import random
 from typing import Any, AsyncIterator
 from uuid import uuid4
+from threading import RLock
+import agents
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -42,6 +44,8 @@ def new_state() -> dict[str, Any]:
         "starting_balance": 10000.0,
         "day_start_balance": 10000.0,
         "positions": [],
+        "history": {},
+        "signals": [],
         "trades": [],
         "logs": [],
         "paused": True,
@@ -104,11 +108,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         else:
             document.pop("_id", None)
             missing = set(state) - set(document)
-            if missing:
-                raise RuntimeError(
-                    "Stored MongoDB application state is incomplete; "
-                    "back up and repair the app_state document before starting."
-                )
+            for key in missing:
+                document[key] = deepcopy(state[key])
             state.clear()
             state.update(document)
     except PyMongoError as exc:
@@ -171,6 +172,8 @@ def equity() -> float:
 
 def snapshot() -> dict[str, Any]:
     return {
+        "automation": agents.options(),
+        "signals": state.get("signals", [])[-20:][::-1],
         "mode": "PAPER",
         "feed": "SYNTHETIC",
         "balance": round(state["balance"], 2),
@@ -244,9 +247,9 @@ def tick() -> dict[str, Any]:
         )
         if hit:
             close_position(position["id"], "SL/TP")
-    if state["balance"] <= state["day_start_balance"] * 0.98:
+    if equity() <= state["day_start_balance"] * 0.98:
         state["paused"] = True
-        log("Supervisor", "Daily loss limit triggered: entries disabled")
+        log("Supervisor", "Daily equity drawdown limit triggered: entries disabled")
     persist_state(previous_state)
     return snapshot()
 
@@ -294,8 +297,8 @@ def order(request: Order) -> dict[str, Any]:
         raise HTTPException(400, "Maximum open positions reached")
     if any(position["pair"] == pair for position in state["positions"]):
         raise HTTPException(400, "Only one position per pair")
-    if state["balance"] <= state["day_start_balance"] * 0.98:
-        raise HTTPException(400, "Daily loss limit")
+    if equity() <= state["day_start_balance"] * 0.98:
+        raise HTTPException(400, "Daily equity drawdown limit")
 
     quote = state["quotes"][pair]
     pip = quote["pip"]
@@ -353,3 +356,14 @@ def close(position_id: str) -> dict[str, Any]:
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "mode": "PAPER", "feed": "SYNTHETIC"}
+
+
+@app.post("/api/auto-cycle")
+def auto_cycle() -> dict[str, Any]:
+    """Explicit simulation step. Synthetic market data; never a broker order."""
+    return agents.tick_cycle(__import__(__name__))
+
+
+@app.get("/api/agents/config")
+def agent_configuration() -> dict[str, Any]:
+    return agents.options()

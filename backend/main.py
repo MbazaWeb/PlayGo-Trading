@@ -2,6 +2,8 @@
 
 from contextlib import asynccontextmanager
 from copy import deepcopy
+import csv
+from io import StringIO
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -13,7 +15,7 @@ import feed
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pymongo import MongoClient
@@ -442,7 +444,8 @@ def close_position(position_id: str, reason: str) -> None:
     state["balance"] = round(state["balance"] + pnl, 2)
     state["positions"].remove(position)
     state["trades"].append(
-        {**position, "exit": exit_price, "pnl": pnl, "reason": reason}
+        {**position, "exit": exit_price, "pnl": pnl, "reason": reason,
+         "closed_at": datetime.now(timezone.utc).isoformat()}
     )
     state["loss_streak"] = state.get("loss_streak", 0) + 1 if pnl < 0 else 0
     enforce_risk_limits()
@@ -530,6 +533,64 @@ def close(position_id: str) -> dict[str, Any]:
     close_position(position_id, "MANUAL")
     persist_state(previous_state)
     return snapshot()
+
+
+
+REPORT_FIELDS = ("id", "pair", "side", "opened_at", "closed_at", "entry",
+                 "exit", "stop", "target", "units", "risk_usd", "pnl", "reason")
+
+
+def filtered_trades(pair: str = "ALL", side: str = "ALL",
+                    outcome: str = "ALL") -> list[dict[str, Any]]:
+    """Read-only closed paper trades, newest first."""
+    if pair not in ("ALL", "EURUSD", "GBPUSD") or side not in ("ALL", "BUY", "SELL"):
+        raise HTTPException(400, "Invalid trade filter")
+    if outcome not in ("ALL", "WIN", "LOSS", "BREAKEVEN"):
+        raise HTTPException(400, "Invalid outcome filter")
+    rows = []
+    for trade in reversed(state["trades"]):
+        pnl = trade.get("pnl", 0)
+        if pair != "ALL" and trade.get("pair") != pair:
+            continue
+        if side != "ALL" and trade.get("side") != side:
+            continue
+        if outcome == "WIN" and pnl <= 0:
+            continue
+        if outcome == "LOSS" and pnl >= 0:
+            continue
+        if outcome == "BREAKEVEN" and pnl != 0:
+            continue
+        rows.append({key: trade.get(key) for key in REPORT_FIELDS})
+    return rows
+
+
+@app.get("/api/reports/trades")
+def trade_report(pair: str = "ALL", side: str = "ALL",
+                 outcome: str = "ALL", limit: int = 50,
+                 offset: int = 0) -> dict[str, Any]:
+    if not 1 <= limit <= 200 or offset < 0:
+        raise HTTPException(400, "Invalid pagination")
+    rows = filtered_trades(pair, side, outcome)
+    return {"total": len(rows), "limit": limit, "offset": offset,
+            "trades": rows[offset:offset + limit]}
+
+
+@app.get("/api/reports/trades.csv")
+def trade_report_csv(pair: str = "ALL", side: str = "ALL",
+                     outcome: str = "ALL") -> Response:
+    rows = filtered_trades(pair, side, outcome)
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=REPORT_FIELDS)
+    writer.writeheader()
+    for row in rows:
+        # Prevent spreadsheet formula injection from untrusted string fields.
+        safe = {key: ("'" + value if isinstance(value, str) and
+                     value.startswith(("=", "+", "-", "@", "\t", "\r"))
+                     else value) for key, value in row.items()}
+        writer.writerow(safe)
+    return Response(output.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="playgo-paper-trades.csv"',
+                             "Cache-Control": "no-store"})
 
 
 @app.get("/api/health")

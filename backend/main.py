@@ -15,6 +15,7 @@ import feed
 import broker
 import periods
 import reconciliation
+import ledger
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -63,11 +64,13 @@ def new_state() -> dict[str, Any]:
         "loss_streak": 0,
         "risk_lock_reason": None,
         "equity_history": [],
+        "revision": 0,
     }
 
 
 state = new_state()
 state_collection: Collection | None = None
+ledger_collection: Collection | None = None
 mongo_client: MongoClient | None = None
 random.seed(12)
 
@@ -78,29 +81,30 @@ def restore_state(previous_state: dict[str, Any]) -> None:
 
 
 def persist_state(previous_state: dict[str, Any]) -> None:
-    if state_collection is None:
+    """Atomic compare-and-swap plus closed-trade event insertion.
+
+    Fail closed when MongoDB transactions are unavailable.
+    """
+    if state_collection is None or ledger_collection is None:
         restore_state(previous_state)
-        raise HTTPException(
-            status_code=503,
-            detail="MongoDB is not connected; the request was not saved.",
-        )
+        raise HTTPException(503, "MongoDB transaction collections unavailable")
     try:
-        state_collection.replace_one(
-            {"_id": STATE_ID},
-            {"_id": STATE_ID, **state},
-            upsert=True,
+        revision = ledger.commit_state(
+            state_collection, ledger_collection, previous_state, state,
         )
+        state["revision"] = revision
+    except ledger.StaleStateError as exc:
+        restore_state(previous_state)
+        raise HTTPException(409, "Stale account state; reload before retrying") from exc
     except PyMongoError as exc:
         restore_state(previous_state)
-        raise HTTPException(
-            status_code=503,
-            detail="MongoDB could not save the request; no changes were applied.",
-        ) from exc
+        raise HTTPException(503, "Atomic MongoDB transaction failed; no changes committed") from exc
+
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global mongo_client, state_collection
+    global mongo_client, state_collection, ledger_collection
 
     uri = os.getenv("MONGODB_URI")
     if not uri:
@@ -112,12 +116,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     client = MongoClient(uri, serverSelectionTimeoutMS=5000, appname="PlayGo AI Trading")
     database_name = os.getenv("MONGODB_DATABASE", "playgo_trading")
     collection = client[database_name]["app_state"]
+    audit_collection = client[database_name]["paper_trade_ledger"]
     try:
         client.admin.command("ping")
         document = collection.find_one({"_id": STATE_ID})
         if document is None:
             collection.insert_one({"_id": STATE_ID, **state})
         else:
+            if "revision" not in document:
+                # Migration of existing paper-only document; concurrent startup is guarded.
+                collection.update_one({"_id": STATE_ID, "revision": {"$exists": False}}, {"$set": {"revision": 0}})
+                document = collection.find_one({"_id": STATE_ID})
             document.pop("_id", None)
             missing = set(state) - set(document)
             for key in missing:
@@ -136,10 +145,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     mongo_client = client
     state_collection = collection
+    ledger_collection = audit_collection
     try:
         yield
     finally:
         state_collection = None
+        ledger_collection = None
         mongo_client = None
         client.close()
 
@@ -615,6 +626,19 @@ def reconciliation_status() -> dict[str, Any]:
         state["positions"], state["trades"],
         state["balance"], state["starting_balance"],
     )
+
+
+@app.get("/api/ledger/events")
+def ledger_events(limit: int = 50) -> dict[str, Any]:
+    """Read-only immutable closed-trade event records."""
+    if not 1 <= limit <= 200:
+        raise HTTPException(400, "Invalid event limit")
+    if ledger_collection is None:
+        raise HTTPException(503, "Ledger unavailable")
+    try:
+        return {"mode": "PAPER", "events": ledger.recent_events(ledger_collection, limit)}
+    except PyMongoError as exc:
+        raise HTTPException(503, "Unable to read trade ledger") from exc
 
 
 @app.get("/api/health")

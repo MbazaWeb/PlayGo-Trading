@@ -70,3 +70,13 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - Multi-process writers now reject stale revisions, but a worker must reload after HTTP 409; concurrent in-memory readers may remain stale.
 - **Next:** full event-sourced account accounting, deposit/withdrawal ledger, replay/rebuild tooling, durable broker demo idempotency, and integration tests against MongoDB Atlas transactions.
 - No deployment was initiated.
+
+## Backend milestone — durable demo intents and crash recovery
+- Added `backend/demo_orders.py`: separate MongoDB `demo_order_intents` collection keyed by client order ID, with `PENDING` → `FILLED` conditional update.
+- Demo order payload and slippage are pinned on first submission; repeated identical requests return the original fill, while mismatched payloads return conflict.
+- Added localhost-only `POST /api/demo/orders` and `POST /api/demo/orders/recover`, plus read-only `GET /api/demo/orders/pending`.
+- Added `backend/test_demo_orders.py` fake-collection tests for duplicate replay, conflict and interrupted settlement. Tests are not yet executed.
+- The demo intent collection is **independent** of the existing paper account: fills do not create positions or debit balances. No external broker API is called.
+- Recovery is manually triggered, bounded and only settles internal deterministic demo fills. No automatic retry of external broker requests.
+- Next: audited account-ledger reconciliation and true double-entry accounting; test MongoDB failure paths, process concurrency and authorization before external exposure.
+- No deployment initiated.

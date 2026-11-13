@@ -95,6 +95,30 @@ class PerformanceTests(unittest.TestCase):
         main.state.clear()
         main.state.update(main.new_state())
 
+    def test_pair_analytics_uses_closed_trades_only(self):
+        main.state["trades"] = [
+            {"pair": "EURUSD", "pnl": 15.0},
+            {"pair": "EURUSD", "pnl": -5.0},
+            {"pair": "GBPUSD", "pnl": 7.0},
+        ]
+        rows = {row["pair"]: row for row in main.trading_analytics()["pair_performance"]}
+        self.assertEqual(rows["EURUSD"]["realized_pnl"], 10.0)
+        self.assertEqual(rows["EURUSD"]["win_rate_pct"], 50.0)
+        self.assertEqual(rows["GBPUSD"]["closed_trades"], 1)
+
+    def test_observed_drawdown_uses_equity_samples(self):
+        main.state["equity_history"] = [
+            {"time": "t1", "equity": 10500},
+            {"time": "t2", "equity": 9975},
+        ]
+        result = main.trading_analytics()
+        self.assertEqual(result["max_observed_drawdown_pct"], 5.0)
+
+    def test_equity_samples_are_bounded(self):
+        main.state["equity_history"] = [{"time": "old", "equity": 10000}] * 500
+        main.record_equity_sample()
+        self.assertEqual(len(main.state["equity_history"]), 500)
+
     def test_decision_timeline_categorizes_persisted_events(self):
         main.state["logs"] = [
             {"id": "a", "time": "2026-11-13T10:00:00+00:00",

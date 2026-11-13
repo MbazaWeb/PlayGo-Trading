@@ -23,6 +23,7 @@ import settlement_audit
 import access_policy
 import identity
 import company
+import owner_access
 from demo_execution import DemoOrderError
 
 from dotenv import load_dotenv
@@ -220,6 +221,27 @@ async def protect_api_endpoints(request: Request, call_next):
     if not allowed:
         return JSONResponse(status_code=status, content={"detail": detail},
                             headers={"Cache-Control": "no-store"})
+    if request.url.path.startswith("/api/"):
+        try:
+            operator = owner_access.authorize_owner(
+                path=request.url.path, method=request.method,
+                authorization=request.headers.get("authorization", ""),
+                users=identity_users, sessions=identity_sessions,
+            )
+            if operator is not None:
+                request.state.company_operator = operator
+        except identity.IdentityError:
+            return JSONResponse(status_code=401,
+                                content={"detail": "Valid PlayGo owner session required"},
+                                headers={"Cache-Control": "no-store"})
+        except company.CompanyAccessError:
+            return JSONResponse(status_code=403,
+                                content={"detail": "Company owner permission required"},
+                                headers={"Cache-Control": "no-store"})
+        except PyMongoError:
+            return JSONResponse(status_code=503,
+                                content={"detail": "Owner session validation unavailable"},
+                                headers={"Cache-Control": "no-store"})
     return await call_next(request)
 
 

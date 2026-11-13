@@ -718,6 +718,8 @@ def accounting_post(entry: AccountingEntry) -> dict[str, Any]:
     """Localhost-only virtual accounting entry; no real money movement."""
     if accounting_collection is None or accounting_journals is None:
         raise HTTPException(503, "Accounting store unavailable")
+    if entry.kind in ("REALIZED_GAIN", "REALIZED_LOSS"):
+        raise HTTPException(403, "Realized P&L can only be posted through verified paper event settlement")
     try:
         return accounting.post(accounting_collection, accounting_journals, **entry.model_dump())
     except accounting.InsufficientFunds as exc:
@@ -747,7 +749,7 @@ def accounting_recent_journals(limit: int = 50) -> dict[str, Any]:
     if accounting_journals is None:
         raise HTTPException(503, "Accounting store unavailable")
     try:
-        rows = accounting_journals.find({"account_id": accounting.ACCOUNT_ID}).sort("created_at", -1).limit(limit)
+        rows = accounting_journals.find({"account_id": accounting.ACCOUNT_ID, "kind": {"$ne": "REVERSAL_CLAIM"}}).sort("created_at", -1).limit(limit)
         return {"mode": "PAPER", "currency": "USD", "journals": [accounting.public_journal(row) for row in rows]}
     except PyMongoError as exc:
         raise HTTPException(503, "Accounting journals unavailable") from exc

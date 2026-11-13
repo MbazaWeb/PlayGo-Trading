@@ -1,5 +1,5 @@
 import React,{useEffect,useState} from 'react';import{createRoot}from'react-dom/client';import{Activity,ShieldCheck,Power,RefreshCw,TrendingUp,History,Settings2,X,LayoutDashboard,Download}from'lucide-react';import './style.css';
-const configuredApi=(import.meta.env.VITE_API_URL||'').trim().replace(/\\/$/,'');
+const configuredApi=(import.meta.env.VITE_API_URL||'').trim().replace(/\/$/,'');
 const API=configuredApi||(location.hostname==='localhost'||location.hostname==='127.0.0.1'?'http://127.0.0.1:8000':'');
 const API_READY=Boolean(API);
 type ClosedTrade={id:string;pair:string;side:string;opened_at?:string;closed_at?:string;entry:number;exit:number;units:number;pnl:number;reason:string};

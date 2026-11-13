@@ -10,6 +10,7 @@ import os
 import time
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -23,13 +24,21 @@ def run_once():
         return json.load(response)
 
 if __name__ == "__main__":
-    if not API.startswith(("http://127.0.0.1:", "http://localhost:")):
-        raise SystemExit("Phase 2 worker requires a local backend")
+    target = urlsplit(API)
+    if target.scheme != "http" or target.hostname not in ("127.0.0.1", "localhost") or target.username or target.password:
+        raise SystemExit("Phase 2 worker requires an HTTP loopback backend")
+    if os.getenv("PAPER_WORKER_ENABLED", "false").lower() != "true":
+        raise SystemExit("Worker is opt-in. Set PAPER_WORKER_ENABLED=true to enable scheduled paper cycles.")
     print(f"PlayGo paper worker started: {API}; cycle every {INTERVAL}s; no live orders", flush=True)
     while True:
         try:
             snapshot = run_once()
             print(f"equity={snapshot['equity']} paused={snapshot['paused']} feed={snapshot['feed']}", flush=True)
-        except (HTTPError, URLError, TimeoutError, ValueError, KeyError) as exc:
+        except HTTPError as exc:
+            if exc.code == 429:
+                print("Cycle cooldown active; waiting until next interval", flush=True)
+            else:
+                print(f"Agent cycle HTTP failure ({exc.code}); no immediate retry", flush=True)
+        except (URLError, TimeoutError, ValueError, KeyError) as exc:
             print(f"Agent cycle failed; no retry before next interval: {type(exc).__name__}", flush=True)
         time.sleep(INTERVAL)

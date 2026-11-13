@@ -40,8 +40,13 @@ class AccessPolicyTests(unittest.TestCase):
                                    peer="127.0.0.1", environment="production",
                                    configured_token=TOKEN)[0])
 
+    def test_openapi_docs_are_private(self):
+        self.assertFalse(authorize(path="/openapi.json", method="GET",
+                                   headers={}, peer="198.51.100.1",
+                                   environment="local", configured_token="")[0])
+
     def test_public_non_api_routes_unaffected(self):
-        self.assertTrue(authorize(path="/docs", method="GET", headers={},
+        self.assertTrue(authorize(path="/", method="GET", headers={},
                                   peer="198.51.100.1", environment="production",
                                   configured_token="")[0])
 

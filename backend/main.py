@@ -20,6 +20,7 @@ import demo_orders
 import accounting
 import settlement
 import settlement_audit
+import access_policy
 from demo_execution import DemoOrderError
 
 from dotenv import load_dotenv
@@ -186,18 +187,19 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def protect_write_endpoints(request: Request, call_next):
-    """Until user authentication exists, reject writes outside local development."""
-    if request.method == "POST" and request.url.path.startswith("/api/"):
-        origin = request.headers.get("origin")
-        allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
-        if origin and origin not in allowed_origins:
-            return JSONResponse(status_code=403, content={"detail": "Untrusted browser origin"})
-        local_mode = os.getenv("PLAYGO_ENV", "local").lower() == "local"
-        peer = request.client.host if request.client else ""
-        if not local_mode or peer not in ("127.0.0.1", "::1", "testclient"):
-            return JSONResponse(status_code=403, content={"detail": "Write endpoints are localhost-only in Phase 2."})
+async def protect_api_endpoints(request: Request, call_next):
+    """Protect all private API reads and writes; never trust CORS as auth."""
+    allowed, status, detail = access_policy.authorize(
+        path=request.url.path,
+        method=request.method,
+        headers=request.headers,
+        peer=request.client.host if request.client else "",
+    )
+    if not allowed:
+        return JSONResponse(status_code=status, content={"detail": detail},
+                            headers={"Cache-Control": "no-store"})
     return await call_next(request)
+
 
 def log(agent: str, message: str) -> None:
     state["logs"].insert(

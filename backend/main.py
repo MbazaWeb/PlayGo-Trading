@@ -54,6 +54,7 @@ def new_state() -> dict[str, Any]:
         "quotes": quotes,
         "feed_type": "SYNTHETIC",
         "ticks": 0,
+        "last_cycle_at": None,
     }
 
 
@@ -229,6 +230,7 @@ def decision_timeline() -> list[dict[str, Any]]:
 def snapshot() -> dict[str, Any]:
     return {
         "automation": agents.options(),
+        "last_cycle_at": state.get("last_cycle_at"),
         "performance": performance(),
         "decision_timeline": decision_timeline(),
         "price_history": {pair: values[-120:] for pair, values in state.get("history", {}).items() if pair in ("EURUSD", "GBPUSD")},

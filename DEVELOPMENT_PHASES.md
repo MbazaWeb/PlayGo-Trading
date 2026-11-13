@@ -109,3 +109,12 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - **Security limitations:** no authentication or user isolation; paper settlement remains manual; event authenticity is based on the internal persisted paper event collection; not broker verified.
 - **Testing limitations:** no live MongoDB test environment or end-to-end test results available. Do not infer correctness from commits alone.
 - No deployment initiated.
+
+## Security milestone — fail-closed private API access and CI
+- `backend/access_policy.py` now gates all `/api/` endpoints and FastAPI documentation/schema routes, not only POST endpoints.
+- Localhost remains available for development. Remote requests are denied by default; with `PLAYGO_ENV=local` and a 32+ character `PLAYGO_DEV_API_TOKEN`, authenticated remote reads are possible. Remote writes remain blocked regardless of token.
+- **This is not user authentication.** A shared development token must not be shipped to browsers or treated as tenant isolation. No public multi-user access or live trading.
+- `backend/test_access_policy.py` covers private read access, blocked writes, token validation and docs protection.
+- `.github/workflows/backend-tests.yml` runs backend unittest discovery on GitHub Actions after relevant commits. Integration tests require disposable MongoDB credentials and skip when absent. CI execution/results have not been verified.
+- No deployment initiated. Public frontend API connectivity is intentionally blocked until a proper authenticated, tenant-isolated backend is implemented.
+- Next: implement per-user identity with server-side JWT verification and per-account document scoping; migrate the legacy shared state only after explicit review.

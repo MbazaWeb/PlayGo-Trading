@@ -11,7 +11,7 @@ from pymongo.errors import DuplicateKeyError
 
 ACCOUNT_ID = "paper-usd-ledger-v1"
 ACCOUNTS = ("CASH", "CONTRIBUTED_CAPITAL", "REALIZED_PNL", "FEES", "WITHDRAWALS")
-KINDS = ("CAPITAL_IN", "WITHDRAWAL", "REALIZED_GAIN", "REALIZED_LOSS", "FEE")
+KINDS = ("CAPITAL_IN", "WITHDRAWAL", "REALIZED_GAIN", "REALIZED_LOSS", "FEE", "REVERSAL")
 NORMAL = {"CASH": 1, "CONTRIBUTED_CAPITAL": -1, "REALIZED_PNL": -1,
           "FEES": 1, "WITHDRAWALS": 1}
 
@@ -34,6 +34,8 @@ def journal_lines(kind: str, amount_cents: int) -> list[dict[str, Any]]:
         raise ValueError("Unsupported journal kind")
     if type(amount_cents) is not int or amount_cents <= 0 or amount_cents > 10**12:
         raise ValueError("Amount must be positive integer cents within permitted bounds")
+    if kind == "REVERSAL":
+        raise ValueError("Reversal lines must reference an existing journal")
     mapping = {
         "CAPITAL_IN": ("CASH", "CONTRIBUTED_CAPITAL"),
         "WITHDRAWAL": ("WITHDRAWALS", "CASH"),
@@ -71,7 +73,18 @@ def post(collection: Collection, journals: Collection, *, transaction_id: str,
         raise ValueError("Invalid transaction ID")
     if not isinstance(reference, str) or len(reference) > 256:
         raise ValueError("Invalid reference")
-    lines = journal_lines(kind, amount_cents)
+    if kind == "REVERSAL":
+        original = journals.find_one({"_id": reference})
+        if not original or original.get("account_id") != ACCOUNT_ID:
+            raise ValueError("Reversal requires an existing journal transaction ID")
+        if original["kind"] == "REVERSAL":
+            raise ValueError("Reversing a reversal is not supported")
+        if amount_cents != original["amount_cents"]:
+            raise ValueError("Reversal amount must equal original journal amount")
+        lines = [{"account": x["account"], "debit_cents": x["credit_cents"],
+                  "credit_cents": x["debit_cents"]} for x in original["lines"]]
+    else:
+        lines = journal_lines(kind, amount_cents)
     existing = journals.find_one({"_id": transaction_id})
     if existing:
         if (existing["kind"], existing["amount_cents"], existing["reference"]) != (kind, amount_cents, reference):
@@ -81,6 +94,10 @@ def post(collection: Collection, journals: Collection, *, transaction_id: str,
     if account is None:
         raise RuntimeError("Ledger account not initialized")
     updated = apply_lines(account["balances"], lines)
+    if kind == "REVERSAL" and journals.find_one(
+        {"account_id": ACCOUNT_ID, "kind": "REVERSAL", "reference": reference}
+    ):
+        raise LedgerConflict("Original transaction already reversed")
     record = {"_id": transaction_id, "account_id": ACCOUNT_ID, "mode": "PAPER",
               "currency": "USD", "kind": kind, "amount_cents": amount_cents,
               "reference": reference, "lines": lines,
@@ -95,6 +112,11 @@ def post(collection: Collection, journals: Collection, *, transaction_id: str,
                 )
                 if result.matched_count != 1:
                     raise LedgerConflict("Account revision changed; retry transaction")
+                if kind == "REVERSAL" and journals.find_one(
+                    {"account_id": ACCOUNT_ID, "kind": "REVERSAL", "reference": reference},
+                    session=session,
+                ):
+                    raise LedgerConflict("Original transaction already reversed")
                 journals.insert_one(record, session=session)
     except DuplicateKeyError:
         existing = journals.find_one({"_id": transaction_id})

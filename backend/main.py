@@ -16,6 +16,8 @@ import broker
 import periods
 import reconciliation
 import ledger
+import demo_orders
+from demo_execution import DemoOrderError
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -71,6 +73,7 @@ def new_state() -> dict[str, Any]:
 state = new_state()
 state_collection: Collection | None = None
 ledger_collection: Collection | None = None
+demo_order_collection: Collection | None = None
 mongo_client: MongoClient | None = None
 random.seed(12)
 
@@ -104,7 +107,7 @@ def persist_state(previous_state: dict[str, Any]) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global mongo_client, state_collection, ledger_collection
+    global mongo_client, state_collection, ledger_collection, demo_order_collection
 
     uri = os.getenv("MONGODB_URI")
     if not uri:
@@ -117,6 +120,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     database_name = os.getenv("MONGODB_DATABASE", "playgo_trading")
     collection = client[database_name]["app_state"]
     audit_collection = client[database_name]["paper_trade_ledger"]
+    demo_collection = client[database_name]["demo_order_intents"]
     try:
         client.admin.command("ping")
         document = collection.find_one({"_id": STATE_ID})
@@ -146,11 +150,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     mongo_client = client
     state_collection = collection
     ledger_collection = audit_collection
+    demo_order_collection = demo_collection
     try:
         yield
     finally:
         state_collection = None
         ledger_collection = None
+        demo_order_collection = None
         mongo_client = None
         client.close()
 
@@ -639,6 +645,54 @@ def ledger_events(limit: int = 50) -> dict[str, Any]:
         return {"mode": "PAPER", "events": ledger.recent_events(ledger_collection, limit)}
     except PyMongoError as exc:
         raise HTTPException(503, "Unable to read trade ledger") from exc
+
+
+class DemoOrderRequest(BaseModel):
+    client_order_id: str
+    pair: str
+    side: str
+    units: int
+    bid: str
+    ask: str
+    slippage_pips: str = "0.2"
+
+
+@app.post("/api/demo/orders")
+def submit_demo_order(request: DemoOrderRequest) -> dict[str, Any]:
+    """Localhost-only, independent simulated fills; does not touch paper balance."""
+    if demo_order_collection is None:
+        raise HTTPException(503, "Demo order store unavailable")
+    try:
+        return demo_orders.submit_demo_order(demo_order_collection, **request.model_dump())
+    except (DemoOrderError, demo_orders.OrderConflict) as exc:
+        raise HTTPException(409 if isinstance(exc, demo_orders.OrderConflict) else 400, str(exc)) from exc
+    except PyMongoError as exc:
+        raise HTTPException(503, "Demo order persistence unavailable") from exc
+
+
+@app.get("/api/demo/orders/pending")
+def pending_demo_orders(limit: int = 50) -> dict[str, Any]:
+    if not 1 <= limit <= 200:
+        raise HTTPException(400, "Invalid limit")
+    if demo_order_collection is None:
+        raise HTTPException(503, "Demo order store unavailable")
+    try:
+        return {"mode": "DEMO", "orders": demo_orders.pending_orders(demo_order_collection, limit)}
+    except PyMongoError as exc:
+        raise HTTPException(503, "Demo order store unavailable") from exc
+
+
+@app.post("/api/demo/orders/recover")
+def recover_demo_orders(limit: int = 50) -> dict[str, Any]:
+    """Manual, localhost-only recovery; never invokes a broker."""
+    if not 1 <= limit <= 200:
+        raise HTTPException(400, "Invalid limit")
+    if demo_order_collection is None:
+        raise HTTPException(503, "Demo order store unavailable")
+    try:
+        return demo_orders.recover_pending(demo_order_collection, limit)
+    except PyMongoError as exc:
+        raise HTTPException(503, "Demo order recovery unavailable") from exc
 
 
 @app.get("/api/health")

@@ -89,5 +89,28 @@ class MongoPersistenceTests(unittest.TestCase):
         self.assertEqual(main.state["logs"], [])
 
 
+
+class PerformanceTests(unittest.TestCase):
+    def setUp(self):
+        main.state.clear()
+        main.state.update(main.new_state())
+
+    def test_empty_account_metrics(self):
+        metrics = main.performance()
+        self.assertEqual(metrics["closed_trades"], 0)
+        self.assertEqual(metrics["win_rate_pct"], 0)
+        self.assertEqual(metrics["net_pnl"], 0)
+
+    def test_realized_win_rate_excludes_open_positions(self):
+        main.state["trades"] = [{"pnl": 20.0}, {"pnl": -10.0}, {"pnl": 0.0}]
+        main.state["balance"] = 10010.0
+        main.state["positions"] = []
+        metrics = main.performance()
+        self.assertEqual(metrics["closed_trades"], 3)
+        self.assertEqual(metrics["wins"], 1)
+        self.assertEqual(metrics["losses"], 1)
+        self.assertEqual(metrics["win_rate_pct"], 33.33)
+        self.assertEqual(metrics["realized_pnl"], 10.0)
+
 if __name__ == "__main__":
     unittest.main()

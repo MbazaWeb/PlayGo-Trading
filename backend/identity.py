@@ -34,12 +34,16 @@ def register(users: Collection, *, username: str, password: str) -> dict[str, st
         raise IdentityError("Username must be 3–32 lowercase letters, digits or underscores")
     if not isinstance(password, str) or not 12 <= len(password) <= 256:
         raise IdentityError("Password must be 12–256 characters")
+    from company import COMPANY_ID
+    if users.find_one({"company_id": COMPANY_ID}):
+        raise IdentityError("Company owner already exists; additional users disabled")
     salt = os.urandom(16)
     user_id = secrets.token_hex(16)
     try:
         users.insert_one({"_id": user_id, "username": username,
                           "salt": salt.hex(), "password_hash": _digest(password, salt),
-                          "created_at": _now().isoformat(), "disabled": False})
+                          "created_at": _now().isoformat(), "disabled": False,
+                          "company_id": COMPANY_ID, "role": "OWNER"})
     except DuplicateKeyError as exc:
         raise IdentityError("Username unavailable") from exc
     return {"user_id": user_id, "username": username}
@@ -47,7 +51,8 @@ def register(users: Collection, *, username: str, password: str) -> dict[str, st
 
 def login(users: Collection, sessions: Collection, *, username: str,
           password: str) -> dict[str, Any]:
-    user = users.find_one({"username": username}) if isinstance(username, str) else None
+    from company import COMPANY_ID
+    user = users.find_one({"username": username, "company_id": COMPANY_ID, "role": "OWNER"}) if isinstance(username, str) else None
     # Perform password hashing even for unknown users to reduce timing signals.
     salt = bytes.fromhex(user["salt"]) if user else bytes(16)
     digest = _digest(password if isinstance(password, str) else "", salt)

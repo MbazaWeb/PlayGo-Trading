@@ -1,9 +1,8 @@
-"""Phase 2: deterministic, synthetic-only autonomous paper trading.
+"""Phase 2: deterministic, paper-only strategy evaluation.
 
 Explicitly not a live forex feed or AI model. Runs via POST /api/auto-cycle
-or an optional single backend worker (AUTO_WORKER=true), never in a web browser.
+or the optional backend/worker.py process, never in a web browser.
 """
-from collections import deque
 from datetime import datetime, timezone
 from statistics import mean
 from threading import RLock
@@ -60,7 +59,7 @@ def create_signal(state: dict[str, Any], pair: str) -> dict[str, Any] | None:
     if not side:
         return None
     return {"pair": pair, "side": side, "stop_pips": 20, "take_profit_pips": 40,
-            "source": "SYNTHETIC_EMA_9_21", "observation_count": len(prices)}
+            "source": f"{state.get('feed_type', 'SYNTHETIC')}_EMA_9_21", "observation_count": len(prices)}
 
 
 def evaluate(state: dict[str, Any], pair: str) -> dict[str, Any] | None:
@@ -102,5 +101,7 @@ def tick_cycle(core: Any) -> dict[str, Any]:
 
 
 def options() -> dict[str, Any]:
-    return {"auto_worker_enabled": os.getenv("AUTO_WORKER", "false").lower() == "true",
-            "feed": "SYNTHETIC", "strategy": "EMA_9_21_CROSS", "execution": "PAPER"}
+    return {"auto_worker_enabled": False,
+            "worker_note": "Start backend/worker.py separately; process status is not tracked",
+            "configured_feed": os.getenv("FOREX_FEED", "synthetic").upper(),
+            "strategy": "EMA_9_21_CROSS", "execution": "PAPER"}

@@ -19,6 +19,7 @@ import ledger
 import demo_orders
 import accounting
 import settlement
+import settlement_audit
 from demo_execution import DemoOrderError
 
 from dotenv import load_dotenv
@@ -768,6 +769,18 @@ def settle_paper_events(limit: int = 100) -> dict[str, Any]:
         )
     except PyMongoError as exc:
         raise HTTPException(503, "Paper settlement persistence unavailable") from exc
+
+
+@app.get("/api/accounting/settlement-audit")
+def paper_settlement_audit(limit: int = 200) -> dict[str, Any]:
+    if not 1 <= limit <= 1000:
+        raise HTTPException(400, "Invalid audit limit")
+    if ledger_collection is None or accounting_journals is None:
+        raise HTTPException(503, "Paper ledger or accounting store unavailable")
+    try:
+        return settlement_audit.audit(ledger_collection, accounting_journals, limit)
+    except PyMongoError as exc:
+        raise HTTPException(503, "Settlement audit unavailable") from exc
 
 
 @app.get("/api/health")

@@ -18,6 +18,7 @@ import reconciliation
 import ledger
 import demo_orders
 import accounting
+import settlement
 from demo_execution import DemoOrderError
 
 from dotenv import load_dotenv
@@ -750,6 +751,21 @@ def accounting_recent_journals(limit: int = 50) -> dict[str, Any]:
         return {"mode": "PAPER", "currency": "USD", "journals": [accounting.public_journal(row) for row in rows]}
     except PyMongoError as exc:
         raise HTTPException(503, "Accounting journals unavailable") from exc
+
+
+@app.post("/api/accounting/settle-paper-events")
+def settle_paper_events(limit: int = 100) -> dict[str, Any]:
+    """Localhost-only idempotent replay of persisted closed-paper-trade events."""
+    if not 1 <= limit <= 200:
+        raise HTTPException(400, "Invalid limit")
+    if ledger_collection is None or accounting_collection is None or accounting_journals is None:
+        raise HTTPException(503, "Paper ledger or accounting store unavailable")
+    try:
+        return settlement.settle_events(
+            ledger_collection, accounting_collection, accounting_journals, limit
+        )
+    except PyMongoError as exc:
+        raise HTTPException(503, "Paper settlement persistence unavailable") from exc
 
 
 @app.get("/api/health")

@@ -12,6 +12,8 @@ from typing import Any, AsyncIterator
 from uuid import uuid4
 import agents
 import feed
+import broker
+import periods
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -591,6 +593,18 @@ def trade_report_csv(pair: str = "ALL", side: str = "ALL",
     return Response(output.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="playgo-paper-trades.csv"',
                              "Cache-Control": "no-store"})
+
+
+@app.get("/api/broker/capabilities")
+def broker_capabilities() -> dict[str, Any]:
+    """Public capability declaration; live trading is always disabled."""
+    return broker.execution_policy()
+
+
+@app.get("/api/analytics/periods")
+def period_analytics() -> dict[str, Any]:
+    """Completed virtual trade P&L grouped by UTC calendar windows."""
+    return periods.summarize(state["trades"])
 
 
 @app.get("/api/health")

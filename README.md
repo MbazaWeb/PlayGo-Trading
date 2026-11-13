@@ -56,3 +56,91 @@ The backend loads the project-root `.env` automatically. Set `MONGODB_DATABASE` 
 - Daily loss reset, realized/unrealized daily P&L, pending orders, a durable audit history, fees, stale quotes, weekend markets, and authenticated multi-user accounts are **not implemented**.
 - MongoDB persistence stores the latest paper-account state in one document; it is not a transactional ledger or multi-user data model.
 - No financial return is guaranteed. Do not expose this starter to the public internet as-is.
+
+## Phase 2 — market-data-assisted paper agents (feature branch)
+
+The Phase 2 implementation adds `backend/agents.py`, `backend/feed.py`,
+`backend/worker.py`, `backend/test_agents.py`, `backend/test_feed.py`,
+a strategy proposal history on the dashboard, and automated simulation endpoints.
+
+**Important boundaries**: all executions remain PAPER, and there is deliberately
+NO broker order endpoint. Six agent *functions/stages* are not six independent
+LLMs. The strategy is a deterministic EMA(9/21) crossover on sampled mid-quotes
+(currently *not OHLC candles*). It is a software demonstration, **not a
+validated profit-making strategy or a reliable backtest**.
+
+### Running Phase 2 on Windows
+
+From the exact checkout folder `C:\Users\Mbaza\Documents\PlayGo Trading`:
+
+```powershell
+git fetch origin
+git switch feature/phase-2-paper-agents
+git pull --ff-only origin feature/phase-2-paper-agents
+Copy-Item .env.example .env  # only if .env does not already exist
+# Edit .env, configure MongoDB URI, and leave FOREX_FEED=synthetic initially.
+cd backend
+py -m pip install -r requirements.txt
+py -m unittest discover -s . -p "test_*.py" -v
+py -m uvicorn main:app --reload --port 8000
+```
+
+In a second terminal:
+```powershell
+cd "C:\Users\Mbaza\Documents\PlayGo Trading\frontend"
+npm ci
+npm run dev
+```
+
+In a third terminal, if automatic 60-second simulation cycles are desired:
+```powershell
+cd "C:\Users\Mbaza\Documents\PlayGo Trading\backend"
+py worker.py
+```
+
+**Run only one backend process and one worker against a given shared paper account.**
+The current MongoDB single-document state is not concurrency-safe or multi-tenant.
+There is no distributed lock, compare-and-swap state version, or user isolation.
+For testing, you can press **Run agent cycle** on the dashboard to execute one
+synthetic quote step plus strategy/risk/virtual execution.
+
+### Read-only OANDA practice pricing (optional)
+
+OANDA practice credentials are optional. If your practice account is eligible
+for the v20 API, set these fields **in backend .env only**:
+
+```dotenv
+FOREX_FEED=oanda_practice
+OANDA_ACCOUNT_ID=YOUR_PRACTICE_ACCOUNT_ID
+OANDA_API_TOKEN=YOUR_PRACTICE_TOKEN
+```
+
+The backend requests `EUR_USD` and `GBP_USD` bid/ask quotes from the
+OANDA **practice** pricing endpoint. It rejects missing, crossed, non-tradeable,
+or >120-second stale quotes and pauses new entries on a feed error.
+Never place tokens in `VITE_*` variables or commit them to Git.
+
+### API changes
+
+- `POST /api/auto-cycle`: advance quotes (synthetic or read-only OANDA
+  practice), evaluate deterministic strategy, route proposals through existing
+  risk checks, and only then create virtual orders
+- `GET /api/agents/config`: describe feed, worker configuration and paper mode
+- `GET /api/status`: also returns `automation` and `signals` fields
+
+### Safety / deployment gates
+
+- Phase 2 write API is restricted to requests from loopback when
+  `PLAYGO_ENV=local`, and blocked entirely otherwise. It lacks authentication;
+  **do not expose FastAPI to the internet or a reverse proxy**.
+- Dashboard may be deployed as a read-only demonstration; do not include
+  `MONGODB_URI`, `OANDA_API_TOKEN`, or `OANDA_ACCOUNT_ID` in frontend build vars.
+- Production release requires authentication, user-scoped accounts, safe session
+  management, transactional ledgers, idempotent queued execution, durable
+  distributed locking, validated historical candle data, weekend/calendar
+  protections, fees and slippage, proper pip-value conversion, risk and
+  integration testing, and observability.
+- USDJPY remains **display-only**; quote currency conversion is not yet
+  implemented. No leveraged trading; size is capped by available virtual equity.
+- This implementation is for development/paper simulation. Returns cannot be
+  inferred from synthetic runs or from social-media trading videos.

@@ -85,8 +85,10 @@ class AccountingTests(unittest.TestCase):
 
     def test_capital_profit_loss_fees_withdrawal(self):
         self.record("1", "CAPITAL_IN", 100000)
-        self.record("2", "REALIZED_GAIN", 2500)
-        self.record("3", "REALIZED_LOSS", 1000)
+        post(self.accounts, self.journals, transaction_id="TRADE:2",
+             kind="REALIZED_GAIN", amount_cents=2500, reference="CLOSED:2")
+        post(self.accounts, self.journals, transaction_id="TRADE:3",
+             kind="REALIZED_LOSS", amount_cents=1000, reference="CLOSED:3")
         self.record("4", "FEE", 200)
         self.record("5", "WITHDRAWAL", 10000)
         balances = self.accounts.account["balances"]

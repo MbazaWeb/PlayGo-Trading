@@ -35,6 +35,13 @@ class RiskEngineTests(unittest.TestCase):
         self.assertLessEqual(p["units"] * p["entry"], before)
         self.assertEqual(p["pair"], "EURUSD")
 
+    def test_aggregate_notional_does_not_exceed_equity(self):
+        main.start()
+        main.order(main.Order(pair="EURUSD", side="BUY"))
+        main.order(main.Order(pair="GBPUSD", side="BUY"))
+        exposure = sum(p["units"] * p["entry"] for p in main.state["positions"])
+        self.assertLessEqual(exposure, main.equity())
+
     def test_duplicate_pair_is_rejected(self):
         main.start()
         main.order(main.Order(pair="EURUSD", side="BUY"))

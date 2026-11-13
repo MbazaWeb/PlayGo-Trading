@@ -95,6 +95,17 @@ class PerformanceTests(unittest.TestCase):
         main.state.clear()
         main.state.update(main.new_state())
 
+    def test_decision_timeline_categorizes_persisted_events(self):
+        main.state["logs"] = [
+            {"id": "a", "time": "2026-11-13T10:00:00+00:00",
+             "agent": "Risk Checker", "message": "Approved EURUSD"},
+            {"id": "b", "time": "2026-11-13T09:59:00+00:00",
+             "agent": "Strategy", "message": "BUY crossover"},
+        ]
+        events = main.decision_timeline()
+        self.assertEqual([event["category"] for event in events], ["RISK", "SIGNAL"])
+        self.assertEqual(events[0]["id"], "a")
+
     def test_empty_account_metrics(self):
         metrics = main.performance()
         self.assertEqual(metrics["closed_trades"], 0)

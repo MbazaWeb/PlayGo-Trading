@@ -95,6 +95,30 @@ class PerformanceTests(unittest.TestCase):
         main.state.clear()
         main.state.update(main.new_state())
 
+    def test_trade_report_filtering_and_pagination(self):
+        main.state["trades"] = [
+            {"id": "a", "pair": "EURUSD", "side": "BUY", "pnl": 5},
+            {"id": "b", "pair": "GBPUSD", "side": "SELL", "pnl": -2},
+            {"id": "c", "pair": "EURUSD", "side": "SELL", "pnl": 10},
+        ]
+        result = main.trade_report(pair="EURUSD", outcome="WIN", limit=1)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["trades"][0]["id"], "c")
+        second = main.trade_report(pair="EURUSD", outcome="WIN", limit=1, offset=1)
+        self.assertEqual(second["trades"][0]["id"], "a")
+
+    def test_trade_report_rejects_invalid_filters(self):
+        with self.assertRaises(HTTPException) as raised:
+            main.trade_report(pair="INVALID")
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_csv_report_has_header_and_safe_values(self):
+        main.state["trades"] = [{"id": "=1+1", "pair": "EURUSD", "side": "BUY", "pnl": 1}]
+        response = main.trade_report_csv()
+        body = response.body.decode("utf-8")
+        self.assertIn("opened_at", body)
+        self.assertIn("'=1+1", body)
+
     def test_pair_analytics_uses_closed_trades_only(self):
         main.state["trades"] = [
             {"pair": "EURUSD", "pnl": 15.0},

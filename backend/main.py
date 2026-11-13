@@ -17,6 +17,7 @@ import periods
 import reconciliation
 import ledger
 import demo_orders
+import accounting
 from demo_execution import DemoOrderError
 
 from dotenv import load_dotenv
@@ -74,6 +75,8 @@ state = new_state()
 state_collection: Collection | None = None
 ledger_collection: Collection | None = None
 demo_order_collection: Collection | None = None
+accounting_collection: Collection | None = None
+accounting_journals: Collection | None = None
 mongo_client: MongoClient | None = None
 random.seed(12)
 
@@ -107,7 +110,7 @@ def persist_state(previous_state: dict[str, Any]) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global mongo_client, state_collection, ledger_collection, demo_order_collection
+    global mongo_client, state_collection, ledger_collection, demo_order_collection, accounting_collection, accounting_journals
 
     uri = os.getenv("MONGODB_URI")
     if not uri:
@@ -121,8 +124,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     collection = client[database_name]["app_state"]
     audit_collection = client[database_name]["paper_trade_ledger"]
     demo_collection = client[database_name]["demo_order_intents"]
+    books_collection = client[database_name]["paper_accounting_accounts"]
+    journal_collection = client[database_name]["paper_accounting_journals"]
     try:
         client.admin.command("ping")
+        books_collection.update_one({"_id": accounting.ACCOUNT_ID}, {"$setOnInsert": accounting.opening_account()}, upsert=True)
         document = collection.find_one({"_id": STATE_ID})
         if document is None:
             collection.insert_one({"_id": STATE_ID, **state})
@@ -151,12 +157,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     state_collection = collection
     ledger_collection = audit_collection
     demo_order_collection = demo_collection
+    accounting_collection = books_collection
+    accounting_journals = journal_collection
     try:
         yield
     finally:
         state_collection = None
         ledger_collection = None
         demo_order_collection = None
+        accounting_collection = None
+        accounting_journals = None
         mongo_client = None
         client.close()
 
@@ -693,6 +703,53 @@ def recover_demo_orders(limit: int = 50) -> dict[str, Any]:
         return demo_orders.recover_pending(demo_order_collection, limit)
     except PyMongoError as exc:
         raise HTTPException(503, "Demo order recovery unavailable") from exc
+
+
+class AccountingEntry(BaseModel):
+    transaction_id: str
+    kind: str
+    amount_cents: int
+    reference: str = ""
+
+
+@app.post("/api/accounting/journals")
+def accounting_post(entry: AccountingEntry) -> dict[str, Any]:
+    """Localhost-only virtual accounting entry; no real money movement."""
+    if accounting_collection is None or accounting_journals is None:
+        raise HTTPException(503, "Accounting store unavailable")
+    try:
+        return accounting.post(accounting_collection, accounting_journals, **entry.model_dump())
+    except accounting.InsufficientFunds as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except accounting.LedgerConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except PyMongoError as exc:
+        raise HTTPException(503, "Atomic accounting write failed") from exc
+
+
+@app.get("/api/accounting/reconciliation")
+def accounting_reconciliation() -> dict[str, Any]:
+    if accounting_collection is None or accounting_journals is None:
+        raise HTTPException(503, "Accounting store unavailable")
+    try:
+        return accounting.reconcile(accounting_collection, accounting_journals)
+    except PyMongoError as exc:
+        raise HTTPException(503, "Accounting reconciliation unavailable") from exc
+
+
+@app.get("/api/accounting/journals")
+def accounting_recent_journals(limit: int = 50) -> dict[str, Any]:
+    if not 1 <= limit <= 200:
+        raise HTTPException(400, "Invalid journal limit")
+    if accounting_journals is None:
+        raise HTTPException(503, "Accounting store unavailable")
+    try:
+        rows = accounting_journals.find({"account_id": accounting.ACCOUNT_ID}).sort("created_at", -1).limit(limit)
+        return {"mode": "PAPER", "currency": "USD", "journals": [accounting.public_journal(row) for row in rows]}
+    except PyMongoError as exc:
+        raise HTTPException(503, "Accounting journals unavailable") from exc
 
 
 @app.get("/api/health")

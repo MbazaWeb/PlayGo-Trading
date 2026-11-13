@@ -15,7 +15,7 @@ class Users:
         self.rows[row["_id"]] = deepcopy(row)
     def find_one(self, query):
         return next((deepcopy(u) for u in self.rows.values()
-                     if u["username"] == query["username"]), None)
+                     if all(u.get(k) == v for k, v in query.items())), None)
 
 
 class Sessions:
@@ -45,18 +45,16 @@ class IdentityTests(unittest.TestCase):
     def setUp(self):
         self.users, self.sessions, self.accounts = Users(), Sessions(), Accounts()
 
-    def test_separate_users_and_accounts(self):
-        a = register(self.users, username="alpha", password="strong-password-123")
-        b = register(self.users, username="bravo", password="another-strong-password")
-        self.assertNotEqual(a["user_id"], b["user_id"])
-        ta = login(self.users, self.sessions, username="alpha", password="strong-password-123")
-        tb = login(self.users, self.sessions, username="bravo", password="another-strong-password")
-        aa = account_for_session(self.accounts, self.sessions, "Bearer " + ta["access_token"])
-        bb = account_for_session(self.accounts, self.sessions, "Bearer " + tb["access_token"])
-        self.assertNotEqual(aa["user_id"], bb["user_id"])
-        self.assertEqual(aa["balance_cents"], 0)
-        self.assertEqual(bb["balance_cents"], 0)
-        self.assertEqual(len(self.accounts.rows), 2)
+    def test_single_company_owner(self):
+        from company import COMPANY_ID
+        owner = register(self.users, username="alpha", password="strong-password-123")
+        token = login(self.users, self.sessions, username="alpha",
+                      password="strong-password-123")["access_token"]
+        self.assertEqual(verify_session(self.sessions, "Bearer " + token), owner["user_id"])
+        self.assertEqual(self.users.rows[owner["user_id"]]["company_id"], COMPANY_ID)
+        self.assertEqual(self.users.rows[owner["user_id"]]["role"], "OWNER")
+        with self.assertRaises(IdentityError):
+            register(self.users, username="bravo", password="another-strong-password")
 
     def test_password_and_token_rejection(self):
         register(self.users, username="alpha", password="strong-password-123")

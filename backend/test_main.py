@@ -1,0 +1,93 @@
+import asyncio
+from copy import deepcopy
+import os
+import unittest
+from unittest.mock import patch
+
+from fastapi import HTTPException
+from pymongo.errors import AutoReconnect
+
+import main
+
+
+class FakeCollection:
+    documents = {}
+    fail_writes = False
+
+    def find_one(self, query):
+        document = self.documents.get(query["_id"])
+        return deepcopy(document) if document else None
+
+    def insert_one(self, document):
+        self.documents[document["_id"]] = deepcopy(document)
+
+    def replace_one(self, query, document, upsert=False):
+        if self.fail_writes:
+            raise AutoReconnect("simulated database outage")
+        self.documents[query["_id"]] = deepcopy(document)
+
+
+class FakeDatabase:
+    def __getitem__(self, _name):
+        return FakeCollection()
+
+
+class FakeAdmin:
+    def command(self, _command):
+        return {"ok": 1}
+
+
+class FakeMongoClient:
+    def __init__(self, *_args, **_kwargs):
+        self.admin = FakeAdmin()
+        self.closed = False
+
+    def __getitem__(self, _name):
+        return FakeDatabase()
+
+    def close(self):
+        self.closed = True
+
+
+class MongoPersistenceTests(unittest.TestCase):
+    def setUp(self):
+        FakeCollection.documents.clear()
+        FakeCollection.fail_writes = False
+        main.state_collection = None
+        main.mongo_client = None
+        main.state.clear()
+        main.state.update(main.new_state())
+
+    def test_state_persists_and_is_restored_on_startup(self):
+        async def run():
+            with patch.dict(
+                os.environ,
+                {
+                    "MONGODB_URI": "mongodb://localhost/test",
+                    "MONGODB_DATABASE": "playgo_test",
+                },
+            ), patch.object(main, "MongoClient", FakeMongoClient):
+                async with main.lifespan(main.app):
+                    main.tick()
+                    self.assertEqual(main.state["ticks"], 1)
+
+                main.state["ticks"] = 99
+                async with main.lifespan(main.app):
+                    self.assertEqual(main.state["ticks"], 1)
+
+        asyncio.run(run())
+
+    def test_failed_write_rolls_back_state(self):
+        main.state_collection = FakeCollection()
+        FakeCollection.fail_writes = True
+
+        with self.assertRaises(HTTPException) as raised:
+            main.start()
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertTrue(main.state["paused"])
+        self.assertEqual(main.state["logs"], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

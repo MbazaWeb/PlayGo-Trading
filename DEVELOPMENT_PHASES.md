@@ -58,3 +58,15 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - `backend/test_demo_execution.py`: deterministic unit tests added, not yet executed.
 - No Vercel or backend deployment requested or initiated.
 - **Next critical milestone:** durable append-only ledger, atomic balance mutations and broker demo reconciliation. Existing shared MongoDB state must not be used for real capital.
+
+## Backend milestone — transactional paper trade ledger
+- Added `backend/ledger.py`: compare-and-swap state revision and newly closed paper-trade event inserts in one MongoDB transaction.
+- `backend/main.py` now requires MongoDB transactions for state changes; transaction-unavailable deployments fail closed.
+- Existing paper account documents without a revision field are migrated to revision 0 at startup.
+- New endpoint: `GET /api/ledger/events?limit=50`.
+- Added `backend/test_ledger.py` unit tests; not executed at user's request.
+- Existing historical trades are **not backfilled** into the event collection; only newly closed trades produce events.
+- This ledger is append-only by application convention, not tamper-proof: production requires restricted MongoDB permissions and immutable external audit storage.
+- Multi-process writers now reject stale revisions, but a worker must reload after HTTP 409; concurrent in-memory readers may remain stale.
+- **Next:** full event-sourced account accounting, deposit/withdrawal ledger, replay/rebuild tooling, durable broker demo idempotency, and integration tests against MongoDB Atlas transactions.
+- No deployment was initiated.

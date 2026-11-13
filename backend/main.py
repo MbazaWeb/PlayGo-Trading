@@ -190,6 +190,7 @@ def equity() -> float:
 def snapshot() -> dict[str, Any]:
     return {
         "automation": agents.options(),
+        "strategy_diagnostics": agents.diagnostics(state),
         "signals": state.get("signals", [])[-20:][::-1],
         "mode": "PAPER",
         "feed": state.get("feed_type", "SYNTHETIC"),

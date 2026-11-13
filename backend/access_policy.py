@@ -11,7 +11,7 @@ from typing import Mapping
 def authorize(*, path: str, method: str, headers: Mapping[str, str],
               peer: str, environment: str | None = None,
               configured_token: str | None = None) -> tuple[bool, int, str]:
-    if not path.startswith("/api/"):
+    if not (path.startswith("/api/") or path in ("/docs", "/redoc", "/openapi.json")):
         return True, 200, "ok"
     env = (environment if environment is not None else os.getenv("PLAYGO_ENV", "local")).lower()
     token = configured_token if configured_token is not None else os.getenv("PLAYGO_DEV_API_TOKEN", "")

@@ -55,6 +55,8 @@ def new_state() -> dict[str, Any]:
         "feed_type": "SYNTHETIC",
         "ticks": 0,
         "last_cycle_at": None,
+        "loss_streak": 0,
+        "risk_lock_reason": None,
     }
 
 
@@ -188,6 +190,49 @@ def equity() -> float:
     return round(state["balance"] + pnl, 2)
 
 
+def risk_status() -> dict[str, Any]:
+    today = datetime.now(timezone.utc).date().isoformat()
+    current_equity = equity()
+    daily_limit = current_equity <= state["day_start_balance"] * 0.98
+    streak_limit = state.get("loss_streak", 0) >= 3
+    reason = state.get("risk_lock_reason")
+    if daily_limit:
+        reason = "DAILY_DRAWDOWN"
+    elif streak_limit:
+        reason = "CONSECUTIVE_LOSSES"
+    return {
+        "session_date_utc": state["day_start_date"],
+        "current_date_utc": today,
+        "day_start_equity": state["day_start_balance"],
+        "loss_streak": state.get("loss_streak", 0),
+        "max_loss_streak": 3,
+        "drawdown_limit_pct": 2.0,
+        "locked": bool(reason),
+        "reason": reason,
+    }
+
+
+def refresh_risk_session() -> None:
+    """Reset daily baseline on UTC rollover, preserving manual pause and positions."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    if state["day_start_date"] != today:
+        state["day_start_date"] = today
+        state["day_start_balance"] = equity()
+        state["loss_streak"] = 0
+        state["risk_lock_reason"] = None
+        state["paused"] = True
+        log("Supervisor", "New UTC session: risk counters reset; manual restart required")
+
+
+def enforce_risk_limits() -> None:
+    status = risk_status()
+    if status["locked"]:
+        state["risk_lock_reason"] = status["reason"]
+        if not state["paused"]:
+            state["paused"] = True
+            log("Supervisor", f'New entries suspended: {status["reason"]}')
+
+
 def performance() -> dict[str, Any]:
     """Realized paper P&L only; open-position P&L is excluded from win rate."""
     trades = state["trades"]
@@ -232,6 +277,7 @@ def snapshot() -> dict[str, Any]:
         "automation": agents.options(),
         "last_cycle_at": state.get("last_cycle_at"),
         "performance": performance(),
+        "risk": risk_status(),
         "decision_timeline": decision_timeline(),
         "price_history": {pair: values[-120:] for pair, values in state.get("history", {}).items() if pair in ("EURUSD", "GBPUSD")},
         "strategy_diagnostics": agents.diagnostics(state),
@@ -270,9 +316,12 @@ def status() -> dict[str, Any]:
 
 @app.post("/api/start")
 def start() -> dict[str, Any]:
-    if equity() <= state["day_start_balance"] * 0.98:
-        raise HTTPException(403, "Daily drawdown limit is active; cannot restart entries")
     previous_state = deepcopy(state)
+    refresh_risk_session()
+    enforce_risk_limits()
+    if risk_status()["locked"]:
+        persist_state(previous_state)
+        raise HTTPException(403, "Risk supervisor lock is active; cannot restart entries")
     state["paused"] = False
     log("Supervisor", f"Paper engine enabled; configured feed: {os.getenv('FOREX_FEED', 'synthetic')}")
     persist_state(previous_state)
@@ -291,6 +340,7 @@ def stop() -> dict[str, Any]:
 @app.post("/api/tick")
 def tick() -> dict[str, Any]:
     previous_state = deepcopy(state)
+    refresh_risk_session()
     source = os.getenv("FOREX_FEED", "synthetic").lower()
     if source == "oanda_practice":
         try:
@@ -326,9 +376,7 @@ def tick() -> dict[str, Any]:
         )
         if hit:
             close_position(position["id"], "SL/TP")
-    if equity() <= state["day_start_balance"] * 0.98:
-        state["paused"] = True
-        log("Supervisor", "Daily equity drawdown limit triggered: entries disabled")
+    enforce_risk_limits()
     persist_state(previous_state)
     return snapshot()
 
@@ -356,6 +404,8 @@ def close_position(position_id: str, reason: str) -> None:
     state["trades"].append(
         {**position, "exit": exit_price, "pnl": pnl, "reason": reason}
     )
+    state["loss_streak"] = state.get("loss_streak", 0) + 1 if pnl < 0 else 0
+    enforce_risk_limits()
     log(
         "Logger",
         f'Closed {position["pair"]} {position["side"]}: P&L ${pnl:.2f} ({reason})',
@@ -368,6 +418,10 @@ def order(request: Order) -> dict[str, Any]:
     side = request.side.upper()
     if state["paused"]:
         raise HTTPException(403, "Trading paused")
+    if state["day_start_date"] != datetime.now(timezone.utc).date().isoformat():
+        raise HTTPException(403, "New UTC session requires supervisor reset and manual restart")
+    if risk_status()["locked"]:
+        raise HTTPException(403, "Risk supervisor lock is active")
     if pair not in PAIRS or side not in ("BUY", "SELL"):
         raise HTTPException(400, "Unsupported pair or side")
     if not 5 <= request.stop_pips <= 100 or not 5 <= request.take_profit_pips <= 300:

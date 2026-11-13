@@ -146,3 +146,12 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - Owner login uses the existing `/api/identity/login` and 8-hour opaque session token. Existing legacy identities without company ownership are not automatically promoted.
 - AI agents and the bot are internal software components, not users; they must operate under the single company paper account and existing risk supervisor. No live-money execution.
 - **Incomplete:** the legacy trading and accounting endpoints still require owner-session authorization integration; bot lifecycle and audit attribution need review; the existing shared development trading state is not yet migrated. Do not expose publicly or deploy.
+
+## Owner authorization enforcement
+- `backend/owner_access.py` maps all private `/api/` trading, reports, demo orders, accounting, identity management and company routes to owner permissions.
+- `backend/main.py` middleware verifies the session token against MongoDB, loads only the `PLAYGO_TANZANIA_LIMITED` OWNER and denies missing/expired/disabled/incorrect-role identities. `/api/health` and identity bootstrap/login/register are exceptions to the owner-session check but remain subject to existing network policy.
+- `backend/test_owner_access.py` tests trading/accounting access and denial cases; execution not verified.
+- Internal AI modules calling Python functions directly do not require HTTP bearer tokens. Any external bot calling HTTP must authenticate as owner; do not expose owner token in a client or bot log.
+- **Breaking integration requirement:** existing frontend does not yet provide owner login/session handling or Authorization headers; its protected requests will return 401 until UI is updated.
+- **Existing identity records:** older development users without `company_id` and `role=OWNER` cannot log in. Owner bootstrap must be done once with server-only secret. Do not auto-promote an arbitrary existing user.
+- No deployment or live-money execution. End-to-end tests with MongoDB and browser still outstanding.

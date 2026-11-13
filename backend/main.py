@@ -10,9 +10,11 @@ from typing import Any, AsyncIterator
 from uuid import uuid4
 from threading import RLock
 import agents
+import feed
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pymongo import MongoClient
@@ -50,6 +52,7 @@ def new_state() -> dict[str, Any]:
         "logs": [],
         "paused": True,
         "quotes": quotes,
+        "feed_type": "SYNTHETIC",
         "ticks": 0,
     }
 
@@ -144,6 +147,16 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def protect_write_endpoints(request: Request, call_next):
+    """Until user authentication exists, reject writes outside local development."""
+    if request.method == "POST" and request.url.path.startswith("/api/"):
+        local_mode = os.getenv("PLAYGO_ENV", "local").lower() == "local"
+        peer = request.client.host if request.client else ""
+        if not local_mode or peer not in ("127.0.0.1", "::1", "testclient"):
+            return JSONResponse(status_code=403, content={"detail": "Write endpoints are localhost-only in Phase 2."})
+    return await call_next(request)
+
 def log(agent: str, message: str) -> None:
     state["logs"].insert(
         0,
@@ -175,7 +188,7 @@ def snapshot() -> dict[str, Any]:
         "automation": agents.options(),
         "signals": state.get("signals", [])[-20:][::-1],
         "mode": "PAPER",
-        "feed": "SYNTHETIC",
+        "feed": state.get("feed_type", "SYNTHETIC"),
         "balance": round(state["balance"], 2),
         "equity": equity(),
         "paused": state["paused"],
@@ -227,15 +240,30 @@ def stop() -> dict[str, Any]:
 @app.post("/api/tick")
 def tick() -> dict[str, Any]:
     previous_state = deepcopy(state)
-    # Development-only synthetic market feed. Replace with verified broker data before realistic paper testing.
-    for pair, (_, pip, spread) in PAIRS.items():
-        quote = state["quotes"][pair]
-        center = (quote["bid"] + quote["ask"]) / 2 + random.gauss(0, pip * 2)
-        precision = 5 if pip < 0.01 else 3
-        quote["bid"] = round(center - spread / 2, precision)
-        quote["ask"] = round(center + spread / 2, precision)
+    source = os.getenv("FOREX_FEED", "synthetic").lower()
+    if source == "oanda_practice":
+        try:
+            fresh = feed.practice_quotes(("EURUSD", "GBPUSD"))
+        except feed.FeedUnavailable as exc:
+            state["paused"] = True
+            log("Supervisor", "Practice feed failed; entries paused")
+            persist_state(previous_state)
+            raise HTTPException(503, str(exc)) from exc
+        for pair, quote in fresh.items():
+            state["quotes"][pair].update(quote)
+        state["feed_type"] = "OANDA_PRACTICE"
+    elif source == "synthetic":
+        state["feed_type"] = "SYNTHETIC"
+        for pair, (_, pip, spread) in PAIRS.items():
+            quote = state["quotes"][pair]
+            center = (quote["bid"] + quote["ask"]) / 2 + random.gauss(0, pip * 2)
+            precision = 5 if pip < 0.01 else 3
+            quote["bid"] = round(center - spread / 2, precision)
+            quote["ask"] = round(center + spread / 2, precision)
+    else:
+        raise HTTPException(503, "Unsupported FOREX_FEED; quotes not updated")
     state["ticks"] += 1
-    log("Scanner", f'Scanned {len(PAIRS)} synthetic FX pairs (tick {state["ticks"]})')
+    log("Scanner", f'Scanned {len(PAIRS)} pairs via {state["feed_type"]} (tick {state["ticks"]})')
     for position in list(state["positions"]):
         price = state["quotes"][position["pair"]][
             "bid" if position["side"] == "BUY" else "ask"
@@ -301,6 +329,10 @@ def order(request: Order) -> dict[str, Any]:
         raise HTTPException(400, "Daily equity drawdown limit")
 
     quote = state["quotes"][pair]
+    if os.getenv("FOREX_FEED", "synthetic").lower() == "oanda_practice":
+        timestamp = quote.get("timestamp")
+        if not timestamp or quote.get("source") != "OANDA_PRACTICE" or (datetime.now(timezone.utc) - datetime.fromisoformat(timestamp)).total_seconds() > 120:
+            raise HTTPException(400, "A fresh OANDA practice quote is required")
     pip = quote["pip"]
     entry = quote["ask" if side == "BUY" else "bid"]
     risk_budget = min(
@@ -312,7 +344,7 @@ def order(request: Order) -> dict[str, Any]:
         ),
     )
     effective_stop = request.stop_pips * pip + quote["spread"]
-    units = int(risk_budget / effective_stop)
+    units = min(int(risk_budget / effective_stop), int(equity() / entry))
     if units < 1:
         raise HTTPException(400, "Insufficient risk budget")
     stop_price = entry + (-1 if side == "BUY" else 1) * request.stop_pips * pip
@@ -355,7 +387,7 @@ def close(position_id: str) -> dict[str, Any]:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "mode": "PAPER", "feed": "SYNTHETIC"}
+    return {"ok": True, "mode": "PAPER", "feed": state.get("feed_type", "SYNTHETIC")}
 
 
 @app.post("/api/auto-cycle")

@@ -99,3 +99,13 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - `backend/test_accounting_integration.py` adds disposable MongoDB replica-set integration tests for idempotent settlement, reversal and reconciliation. Requires `PLAYGO_TEST_MONGODB_URI` and `PLAYGO_TEST_MONGODB_DATABASE=playgo_test_...`. **Not executed**: no test MongoDB connection supplied.
 - Settlement is an explicitly invoked, bounded reconciliation step rather than an automatic background worker. Initial virtual capital must be posted before realizing losses; no historical trade backfill is attempted.
 - Important: the existing frontend and backend cannot communicate on the hosted website until a backend is hosted, `VITE_API_URL` is configured, and HTTPS/CORS are aligned. No deployment initiated by assistant.
+
+## Accounting hardening milestone
+- Manual `POST /api/accounting/journals` requests for `REALIZED_GAIN` and `REALIZED_LOSS` are blocked; only the dedicated persisted paper event settlement endpoint may post those journal types.
+- Accounting journal P&L entries now require deterministic `TRADE:<id>` and `CLOSED:<id>` reference pairing.
+- Reversals insert a unique `REVERSAL_CLAIM:<original transaction ID>` document inside the same MongoDB transaction as the reversal journal and account update. Internal claim documents are excluded from journal listing and reconciliation count.
+- `GET /api/accounting/settlement-audit` compares recent persisted paper-close events with corresponding journals, reporting missing or mismatched settlements. The audit is bounded, not exhaustive.
+- Existing `test_accounting.py` fixtures updated for settlement-linked IDs.
+- **Security limitations:** no authentication or user isolation; paper settlement remains manual; event authenticity is based on the internal persisted paper event collection; not broker verified.
+- **Testing limitations:** no live MongoDB test environment or end-to-end test results available. Do not infer correctness from commits alone.
+- No deployment initiated.

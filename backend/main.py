@@ -14,6 +14,7 @@ import agents
 import feed
 import broker
 import periods
+import reconciliation
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -605,6 +606,15 @@ def broker_capabilities() -> dict[str, Any]:
 def period_analytics() -> dict[str, Any]:
     """Completed virtual trade P&L grouped by UTC calendar windows."""
     return periods.summarize(state["trades"])
+
+
+@app.get("/api/diagnostics/reconciliation")
+def reconciliation_status() -> dict[str, Any]:
+    """Read-only integrity check of the current paper account."""
+    return reconciliation.reconcile(
+        state["positions"], state["trades"],
+        state["balance"], state["starting_balance"],
+    )
 
 
 @app.get("/api/health")

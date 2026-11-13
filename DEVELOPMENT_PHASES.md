@@ -128,3 +128,13 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - **Critical separation:** the legacy `/api/status`, trading routes, demo orders and accounting endpoints still use shared global state and are NOT per-user scoped. The new isolated accounts are deliberately read-only and start at zero. No automatic migration, and no real-money functionality.
 - Existing remote API restrictions remain; the new identity routes are localhost-only under the existing policy. No deployment initiated.
 - Next: refactor all trading/accounting persistence to require verified user identity and tenant-scoped queries, then implement a reviewed legacy migration and end-to-end database isolation tests.
+
+## Architecture correction — PlayGo company-owned account (not multi-tenant)
+- Trading capital and financial records belong exclusively to **PlayGo Tanzania Limited**, company key `PLAYGO_TANZANIA_LIMITED`.
+- Staff members are operators within the company, not independent account holders. Roles defined: OWNER, TRADER, ACCOUNTANT, AUDITOR; role policy implemented in `backend/company.py`.
+- Public `POST /api/identity/register` is disabled; company staff must be explicitly provisioned by an owner through a future secure workflow. Existing development identities do not automatically become company staff.
+- Legacy `GET /api/identity/me/paper-account` now returns company staff context without creating a personal balance.
+- Owner-only `GET /api/company/migration-preview` reports legacy trading state and accounting counts without writing or migrating any funds.
+- `backend/test_company.py` covers company identity, role permissions, staff rejection and fail-closed migration preview.
+- **Not yet complete:** role authorization is not yet enforced on all legacy trading/accounting endpoints; no company owner bootstrap or staff provisioning workflow exists; shared paper trading state remains. This is a safe architecture transition, not a completed authorization cutover.
+- Do not create per-user trading accounts or auto-migrate legacy capital. No deployment initiated.

@@ -7,3 +7,5 @@
 .cycleInfo{padding:0 0 16px;color:#a5b5cd}.cycleInfo small{line-height:1.7}
 
 .riskSupervisor{margin-bottom:16px}.riskSupervisor .performanceGrid{margin-bottom:16px}.riskSupervisor .performanceGrid strong{font-size:16px;overflow-wrap:anywhere}
+
+.analyticsHighlight{display:flex;justify-content:space-between;align-items:center;margin-top:18px;padding:13px;background:#1b2b44;border-radius:10px;gap:10px}.analyticsHighlight strong{font-size:23px;color:#ffd48a}.pairAnalytics{overflow-x:auto}.pairAnalyticsHead,.pairAnalyticsRow{display:grid;grid-template-columns:1.1fr .7fr .9fr 1.2fr;gap:8px;min-width:360px;padding:13px 4px;border-bottom:1px solid #26334c;font-size:12px}.pairAnalyticsHead{color:#8495b0;font-size:10px}.pairAnalyticsRow span{font-variant-numeric:tabular-nums}.pairAnalyticsRow span:last-child{text-align:right}

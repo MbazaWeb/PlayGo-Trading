@@ -64,6 +64,30 @@ class RiskEngineTests(unittest.TestCase):
             main.start()
         self.assertEqual(error.exception.status_code, 403)
 
+    def test_three_losses_lock_new_entries(self):
+        main.state["loss_streak"] = 3
+        main.enforce_risk_limits()
+        self.assertTrue(main.state["paused"])
+        self.assertEqual(main.risk_status()["reason"], "CONSECUTIVE_LOSSES")
+        with self.assertRaises(HTTPException) as error:
+            main.start()
+        self.assertEqual(error.exception.status_code, 403)
+
+    def test_new_utc_session_requires_manual_restart(self):
+        main.state["day_start_date"] = "2000-01-01"
+        main.state["loss_streak"] = 3
+        main.state["paused"] = False
+        main.refresh_risk_session()
+        self.assertEqual(main.state["loss_streak"], 0)
+        self.assertTrue(main.state["paused"])
+        self.assertIsNone(main.state["risk_lock_reason"])
+
+    def test_daily_drawdown_triggers_supervisor_lock(self):
+        main.state["balance"] = 9700
+        main.enforce_risk_limits()
+        self.assertTrue(main.state["paused"])
+        self.assertEqual(main.risk_status()["reason"], "DAILY_DRAWDOWN")
+
     def test_manual_close_creates_virtual_trade(self):
         main.start()
         main.order(main.Order(pair="GBPUSD", side="BUY"))

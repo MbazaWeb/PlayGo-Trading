@@ -91,3 +91,11 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - **Important isolation:** This new paper accounting ledger starts with zero balance. It is NOT synchronized with the legacy $10,000 virtual trading state, demo fills, or real bank/broker accounts. The initial virtual capital must be recorded as an explicit CAPITAL_IN entry.
 - **Production blockers:** authenticated multi-user accounts, bank/broker statement matching, trusted execution-event posting, safe migration of historical paper trades, controlled correction/reversal entries, immutable audit backups, transaction integration tests, and comprehensive financial compliance review.
 - No deployment initiated and no real money handled.
+
+## Backend milestone — fetch diagnostics, paper settlement, reversals
+- Frontend no longer points a hosted browser at `127.0.0.1:8000`; missing `VITE_API_URL` shows a clear backend-not-connected message and disables order actions. **A running HTTPS backend is still required** for real API connectivity; no backend was deployed.
+- `backend/settlement.py` validates persisted closed-paper-trade event identity and exact-cent P&L, then books deterministic `TRADE:<trade_id>` accounting journals. Replay is idempotent and returns individual failures. New localhost-only `POST /api/accounting/settle-paper-events`.
+- `REVERSAL` journal kind reverses an existing entry using the original journal ID as `reference`, preserving the original record. Double reversal is rejected; reversed cash balances cannot go negative.
+- `backend/test_accounting_integration.py` adds disposable MongoDB replica-set integration tests for idempotent settlement, reversal and reconciliation. Requires `PLAYGO_TEST_MONGODB_URI` and `PLAYGO_TEST_MONGODB_DATABASE=playgo_test_...`. **Not executed**: no test MongoDB connection supplied.
+- Settlement is an explicitly invoked, bounded reconciliation step rather than an automatic background worker. Initial virtual capital must be posted before realizing losses; no historical trade backfill is attempted.
+- Important: the existing frontend and backend cannot communicate on the hosted website until a backend is hosted, `VITE_API_URL` is configured, and HTTPS/CORS are aligned. No deployment initiated by assistant.

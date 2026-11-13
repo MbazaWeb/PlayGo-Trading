@@ -57,6 +57,7 @@ def new_state() -> dict[str, Any]:
         "last_cycle_at": None,
         "loss_streak": 0,
         "risk_lock_reason": None,
+        "equity_history": [],
     }
 
 
@@ -250,6 +251,43 @@ def performance() -> dict[str, Any]:
     }
 
 
+def record_equity_sample() -> None:
+    """Store bounded, timestamped equity observations after market updates."""
+    state.setdefault("equity_history", []).append({
+        "time": datetime.now(timezone.utc).isoformat(),
+        "equity": equity(),
+    })
+    state["equity_history"] = state["equity_history"][-500:]
+
+
+def trading_analytics() -> dict[str, Any]:
+    """Descriptive paper-only metrics; no performance forecasting."""
+    samples = state.get("equity_history", [])
+    peak = float(state["starting_balance"])
+    max_drawdown = 0.0
+    for sample in samples:
+        value = float(sample["equity"])
+        peak = max(peak, value)
+        if peak > 0:
+            max_drawdown = max(max_drawdown, (peak - value) / peak * 100)
+    pairs = []
+    for pair in ("EURUSD", "GBPUSD"):
+        trades = [t for t in state["trades"] if t.get("pair") == pair]
+        wins = sum(t["pnl"] > 0 for t in trades)
+        pairs.append({
+            "pair": pair, "closed_trades": len(trades),
+            "wins": wins, "losses": sum(t["pnl"] < 0 for t in trades),
+            "win_rate_pct": round(wins / len(trades) * 100, 2) if trades else 0.0,
+            "realized_pnl": round(sum(t["pnl"] for t in trades), 2),
+        })
+    return {
+        "equity_history": samples[-120:],
+        "max_observed_drawdown_pct": round(max_drawdown, 2),
+        "drawdown_sample_count": len(samples),
+        "pair_performance": pairs,
+    }
+
+
 def decision_timeline() -> list[dict[str, Any]]:
     """Read-only unified view of persisted agent events; newest first."""
     categories = {
@@ -277,6 +315,7 @@ def snapshot() -> dict[str, Any]:
         "automation": agents.options(),
         "last_cycle_at": state.get("last_cycle_at"),
         "performance": performance(),
+        "analytics": trading_analytics(),
         "risk": risk_status(),
         "decision_timeline": decision_timeline(),
         "price_history": {pair: values[-120:] for pair, values in state.get("history", {}).items() if pair in ("EURUSD", "GBPUSD")},
@@ -377,6 +416,7 @@ def tick() -> dict[str, Any]:
         if hit:
             close_position(position["id"], "SL/TP")
     enforce_risk_limits()
+    record_equity_sample()
     persist_state(previous_state)
     return snapshot()
 
@@ -406,6 +446,7 @@ def close_position(position_id: str, reason: str) -> None:
     )
     state["loss_streak"] = state.get("loss_streak", 0) + 1 if pnl < 0 else 0
     enforce_risk_limits()
+    record_equity_sample()
     log(
         "Logger",
         f'Closed {position["pair"]} {position["side"]}: P&L ${pnl:.2f} ({reason})',

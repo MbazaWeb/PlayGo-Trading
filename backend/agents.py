@@ -49,6 +49,30 @@ def signal(prices: list[float]) -> str | None:
     return None
 
 
+def diagnostics(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read-only signal telemetry; HOLD is not an executable order."""
+    rows = []
+    for pair in PAIRS:
+        prices = state.get("history", {}).get(pair, [])
+        quote = state["quotes"][pair]
+        spread = round((quote["ask"] - quote["bid"]) / pip_size(pair), 2)
+        enough = len(prices) >= 23
+        fast = round(ema(prices, 9), 6) if len(prices) >= 9 else None
+        slow = round(ema(prices, 21), 6) if len(prices) >= 21 else None
+        crossed = signal(prices) if enough else None
+        allowed = spread <= MAX_SPREAD_PIPS[pair]
+        rows.append({
+            "pair": pair, "signal": crossed if allowed and crossed else "HOLD",
+            "ema_fast": fast, "ema_slow": slow, "spread_pips": spread,
+            "observations": len(prices), "required_observations": 23,
+            "ready": enough, "spread_acceptable": allowed,
+            "reason": ("WARMING_UP" if not enough else
+                       "SPREAD_TOO_WIDE" if not allowed else
+                       "CROSSOVER" if crossed else "NO_CROSSOVER"),
+        })
+    return rows
+
+
 def create_signal(state: dict[str, Any], pair: str) -> dict[str, Any] | None:
     q = state["quotes"][pair]
     spread_pips = (q["ask"] - q["bid"]) / pip_size(pair)
@@ -88,7 +112,7 @@ def tick_cycle(core: Any) -> dict[str, Any]:
                 continue
             core.state.setdefault("signals", []).append({**proposal, "created_at": datetime.now(timezone.utc).isoformat()})
             core.state["signals"] = core.state["signals"][-100:]
-            core.log("Strategy", f'{pair} {proposal["side"]}: EMA(9/21) synthetic crossover')
+            core.log("Strategy", f'{pair} {proposal["side"]}: EMA(9/21) sampled-price crossover')
             core.persist_state(previous)
             try:
                 core.order(core.Order(**{k: proposal[k] for k in ("pair", "side", "stop_pips", "take_profit_pips")}))

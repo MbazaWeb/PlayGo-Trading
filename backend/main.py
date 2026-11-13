@@ -204,10 +204,33 @@ def performance() -> dict[str, Any]:
     }
 
 
+def decision_timeline() -> list[dict[str, Any]]:
+    """Read-only unified view of persisted agent events; newest first."""
+    categories = {
+        "Scanner": "MARKET",
+        "Strategy": "SIGNAL",
+        "Risk Checker": "RISK",
+        "Executor": "EXECUTION",
+        "Logger": "CLOSE",
+        "Supervisor": "CONTROL",
+    }
+    return [
+        {
+            "id": item["id"],
+            "time": item["time"],
+            "agent": item["agent"],
+            "category": categories.get(item["agent"], "SYSTEM"),
+            "message": item["message"],
+        }
+        for item in state.get("logs", [])[:100]
+    ]
+
+
 def snapshot() -> dict[str, Any]:
     return {
         "automation": agents.options(),
         "performance": performance(),
+        "decision_timeline": decision_timeline(),
         "price_history": {pair: values[-120:] for pair, values in state.get("history", {}).items() if pair in ("EURUSD", "GBPUSD")},
         "strategy_diagnostics": agents.diagnostics(state),
         "signals": state.get("signals", [])[-20:][::-1],

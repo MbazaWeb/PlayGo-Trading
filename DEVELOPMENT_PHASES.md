@@ -80,3 +80,14 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - Recovery is manually triggered, bounded and only settles internal deterministic demo fills. No automatic retry of external broker requests.
 - Next: audited account-ledger reconciliation and true double-entry accounting; test MongoDB failure paths, process concurrency and authorization before external exposure.
 - No deployment initiated.
+
+## Backend milestone — independent double-entry paper accounting
+- `backend/accounting.py`: USD-only double-entry accounting using integer cents, five nominal accounts (CASH, CONTRIBUTED_CAPITAL, REALIZED_PNL, FEES, WITHDRAWALS), and five journal types.
+- Journal entries are balanced by construction. Insufficient virtual cash blocks withdrawals, fees and realized losses.
+- Account revision update and unique-ID journal insert occur in one MongoDB transaction; retries of an identical transaction ID are idempotent.
+- New `POST /api/accounting/journals` (localhost-only), `GET /api/accounting/journals`, and `GET /api/accounting/reconciliation`.
+- Reconciliation independently replays the complete journal, compares stored balances, checks trial balance and revision/journal count.
+- Added `backend/test_accounting.py` unit tests (not executed).
+- **Important isolation:** This new paper accounting ledger starts with zero balance. It is NOT synchronized with the legacy $10,000 virtual trading state, demo fills, or real bank/broker accounts. The initial virtual capital must be recorded as an explicit CAPITAL_IN entry.
+- **Production blockers:** authenticated multi-user accounts, bank/broker statement matching, trusted execution-event posting, safe migration of historical paper trades, controlled correction/reversal entries, immutable audit backups, transaction integration tests, and comprehensive financial compliance review.
+- No deployment initiated and no real money handled.

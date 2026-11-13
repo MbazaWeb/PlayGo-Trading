@@ -8,7 +8,6 @@ from pathlib import Path
 import random
 from typing import Any, AsyncIterator
 from uuid import uuid4
-from threading import RLock
 import agents
 import feed
 
@@ -45,6 +44,7 @@ def new_state() -> dict[str, Any]:
         "balance": 10000.0,
         "starting_balance": 10000.0,
         "day_start_balance": 10000.0,
+        "day_start_date": datetime.now(timezone.utc).date().isoformat(),
         "positions": [],
         "history": {},
         "signals": [],
@@ -229,7 +229,7 @@ def start() -> dict[str, Any]:
         raise HTTPException(403, "Daily drawdown limit is active; cannot restart entries")
     previous_state = deepcopy(state)
     state["paused"] = False
-    log("Supervisor", "Paper engine enabled; synthetic feed only")
+    log("Supervisor", f"Paper engine enabled; configured feed: {os.getenv('FOREX_FEED', 'synthetic')}")
     persist_state(previous_state)
     return snapshot()
 
@@ -341,6 +341,7 @@ def order(request: Order) -> dict[str, Any]:
             raise HTTPException(400, "A fresh OANDA practice quote is required")
     pip = quote["pip"]
     entry = quote["ask" if side == "BUY" else "bid"]
+    available_notional = max(0.0, equity() - sum(p["units"] * p["entry"] for p in state["positions"]))
     risk_budget = min(
         equity() * 0.005,
         max(
@@ -350,7 +351,7 @@ def order(request: Order) -> dict[str, Any]:
         ),
     )
     effective_stop = request.stop_pips * pip + quote["spread"]
-    units = min(int(risk_budget / effective_stop), int(equity() / entry))
+    units = min(int(risk_budget / effective_stop), int(available_notional / entry))
     if units < 1:
         raise HTTPException(400, "Insufficient risk budget")
     stop_price = entry + (-1 if side == "BUY" else 1) * request.stop_pips * pip
@@ -361,8 +362,8 @@ def order(request: Order) -> dict[str, Any]:
             400,
             "USDJPY disabled until quote-currency conversion is implemented",
         )
-    if units * entry > equity():
-        raise HTTPException(400, "Unleveraged notional exceeds equity")
+    if units * entry > available_notional:
+        raise HTTPException(400, "Aggregate unleveraged notional exceeds equity")
 
     previous_state = deepcopy(state)
     position = {

@@ -87,6 +87,8 @@ def tick_cycle(core: Any) -> dict[str, Any]:
             if proposal is None:
                 core.persist_state(previous)  # preserve history even if no signal
                 continue
+            core.state.setdefault("signals", []).append({**proposal, "created_at": datetime.now(timezone.utc).isoformat()})
+            core.state["signals"] = core.state["signals"][-100:]
             core.log("Strategy", f'{pair} {proposal["side"]}: EMA(9/21) synthetic crossover')
             core.persist_state(previous)
             try:

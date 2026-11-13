@@ -8,6 +8,7 @@ from statistics import mean
 from threading import RLock
 from typing import Any
 import os
+from fastapi import HTTPException
 
 PAIRS = ("EURUSD", "GBPUSD")
 MAX_CANDLES = 120
@@ -100,8 +101,18 @@ def tick_cycle(core: Any) -> dict[str, Any]:
     """
     from copy import deepcopy
     with _cycle_lock:
-        # Core tick persists market move and stop/target changes first.
+        # Process-local lock plus persisted cooldown; not a distributed lock.
+        now = datetime.now(timezone.utc)
+        minimum = max(30, int(os.getenv("PAPER_CYCLE_MIN_SECONDS", "30")))
+        last = core.state.get("last_cycle_at")
+        if last:
+            elapsed = (now - datetime.fromisoformat(last)).total_seconds()
+            if elapsed < minimum:
+                raise HTTPException(429, f"Cycle cooldown active; retry in {max(1, int(minimum - elapsed + 0.999))}s")
         core.tick()
+        previous_cycle = deepcopy(core.state)
+        core.state["last_cycle_at"] = now.isoformat()
+        core.persist_state(previous_cycle)
         if core.state["paused"]:
             return core.snapshot()
         for pair in PAIRS:
@@ -128,4 +139,5 @@ def options() -> dict[str, Any]:
     return {"auto_worker_enabled": False,
             "worker_note": "Start backend/worker.py separately; process status is not tracked",
             "configured_feed": os.getenv("FOREX_FEED", "synthetic").upper(),
+            "minimum_cycle_seconds": max(30, int(os.getenv("PAPER_CYCLE_MIN_SECONDS", "30"))),
             "strategy": "EMA_9_21_CROSS", "execution": "PAPER"}

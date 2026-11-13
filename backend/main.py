@@ -140,6 +140,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         client.admin.command("ping")
         users_collection.create_index("username", unique=True)
+        users_collection.create_index(
+            "company_id", unique=True,
+            partialFilterExpression={"company_id": company.COMPANY_ID},
+            name="single_playgo_owner",
+        )
         sessions_collection.create_index("expires_at", expireAfterSeconds=0)
         user_accounts_collection.create_index("user_id", unique=True)
         books_collection.update_one({"_id": accounting.ACCOUNT_ID}, {"$setOnInsert": accounting.opening_account()}, upsert=True)

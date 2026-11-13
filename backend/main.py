@@ -809,7 +809,25 @@ class RegisterIdentity(BaseModel):
 
 @app.post("/api/identity/register")
 def identity_register(payload: RegisterIdentity) -> dict[str, str]:
-    raise HTTPException(403, "Self-registration disabled. Staff must be provisioned by PlayGo.")
+    raise HTTPException(403, "Public registration disabled; single PlayGo owner only")
+
+
+@app.post("/api/identity/bootstrap-owner")
+def bootstrap_company_owner(payload: RegisterIdentity, request: Request) -> dict[str, str]:
+    """One-time local setup; requires out-of-band bootstrap secret."""
+    if identity_users is None:
+        raise HTTPException(503, "Identity store unavailable")
+    from hmac import compare_digest
+    secret = os.getenv("PLAYGO_OWNER_BOOTSTRAP_SECRET", "")
+    supplied = request.headers.get("x-playgo-bootstrap-secret", "")
+    if len(secret) < 32 or not compare_digest(secret, supplied):
+        raise HTTPException(403, "Owner bootstrap disabled or unauthorized")
+    try:
+        return identity.register(identity_users, **payload.model_dump())
+    except identity.IdentityError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except PyMongoError as exc:
+        raise HTTPException(503, "Identity store unavailable") from exc
 
 
 @app.post("/api/identity/login")

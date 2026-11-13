@@ -155,3 +155,11 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - **Breaking integration requirement:** existing frontend does not yet provide owner login/session handling or Authorization headers; its protected requests will return 401 until UI is updated.
 - **Existing identity records:** older development users without `company_id` and `role=OWNER` cannot log in. Owner bootstrap must be done once with server-only secret. Do not auto-promote an arbitrary existing user.
 - No deployment or live-money execution. End-to-end tests with MongoDB and browser still outstanding.
+
+## Frontend owner login integration
+- `frontend/src/main.tsx` now gates dashboard rendering behind owner username/password login at `POST /api/identity/login`.
+- Bearer session token is held in browser `sessionStorage`, not persisted to localStorage or hardcoded in the frontend bundle. Sign-out clears it. An expired/invalid owner session returns to the login screen.
+- Authenticated requests cover status polling, trading actions, trade history, and CSV downloads. CSV uses a fetch+Blob download so the Authorization header is included (ordinary links cannot send bearer headers).
+- Existing `VITE_API_URL` and backend HTTPS/CORS requirements remain. Backend bootstrap of the owner account must be completed locally before login.
+- **Security caveat:** sessionStorage is accessible to same-origin JavaScript; harden against XSS and consider secure HttpOnly cookies/CSRF protection before any production use.
+- **Validation pending:** frontend TypeScript build, browser smoke test, backend MongoDB integration tests and GitHub Actions results have not been verified. No deployment initiated.

@@ -21,6 +21,7 @@ import accounting
 import settlement
 import settlement_audit
 import access_policy
+import identity
 from demo_execution import DemoOrderError
 
 from dotenv import load_dotenv
@@ -80,6 +81,9 @@ ledger_collection: Collection | None = None
 demo_order_collection: Collection | None = None
 accounting_collection: Collection | None = None
 accounting_journals: Collection | None = None
+identity_users: Collection | None = None
+identity_sessions: Collection | None = None
+user_paper_accounts: Collection | None = None
 mongo_client: MongoClient | None = None
 random.seed(12)
 
@@ -113,7 +117,7 @@ def persist_state(previous_state: dict[str, Any]) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global mongo_client, state_collection, ledger_collection, demo_order_collection, accounting_collection, accounting_journals
+    global mongo_client, state_collection, ledger_collection, demo_order_collection, accounting_collection, accounting_journals, identity_users, identity_sessions, user_paper_accounts
 
     uri = os.getenv("MONGODB_URI")
     if not uri:
@@ -129,8 +133,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     demo_collection = client[database_name]["demo_order_intents"]
     books_collection = client[database_name]["paper_accounting_accounts"]
     journal_collection = client[database_name]["paper_accounting_journals"]
+    users_collection = client[database_name]["dev_identity_users"]
+    sessions_collection = client[database_name]["dev_identity_sessions"]
+    user_accounts_collection = client[database_name]["user_paper_accounts"]
     try:
         client.admin.command("ping")
+        users_collection.create_index("username", unique=True)
+        sessions_collection.create_index("expires_at", expireAfterSeconds=0)
+        user_accounts_collection.create_index("user_id", unique=True)
         books_collection.update_one({"_id": accounting.ACCOUNT_ID}, {"$setOnInsert": accounting.opening_account()}, upsert=True)
         document = collection.find_one({"_id": STATE_ID})
         if document is None:
@@ -162,6 +172,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     demo_order_collection = demo_collection
     accounting_collection = books_collection
     accounting_journals = journal_collection
+    identity_users = users_collection
+    identity_sessions = sessions_collection
+    user_paper_accounts = user_accounts_collection
     try:
         yield
     finally:
@@ -170,6 +183,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         demo_order_collection = None
         accounting_collection = None
         accounting_journals = None
+        identity_users = None
+        identity_sessions = None
+        user_paper_accounts = None
         mongo_client = None
         client.close()
 
@@ -783,6 +799,63 @@ def paper_settlement_audit(limit: int = 200) -> dict[str, Any]:
         return settlement_audit.audit(ledger_collection, accounting_journals, limit)
     except PyMongoError as exc:
         raise HTTPException(503, "Settlement audit unavailable") from exc
+
+
+class RegisterIdentity(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/identity/register")
+def identity_register(payload: RegisterIdentity) -> dict[str, str]:
+    """Local development only. Does not expose or migrate the shared trading state."""
+    if identity_users is None:
+        raise HTTPException(503, "Identity store unavailable")
+    try:
+        return identity.register(identity_users, **payload.model_dump())
+    except identity.IdentityError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except PyMongoError as exc:
+        raise HTTPException(503, "Identity store unavailable") from exc
+
+
+@app.post("/api/identity/login")
+def identity_login(payload: RegisterIdentity) -> dict[str, Any]:
+    if identity_users is None or identity_sessions is None:
+        raise HTTPException(503, "Identity store unavailable")
+    try:
+        return identity.login(identity_users, identity_sessions, **payload.model_dump())
+    except identity.IdentityError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except PyMongoError as exc:
+        raise HTTPException(503, "Identity store unavailable") from exc
+
+
+@app.get("/api/identity/me/paper-account")
+def identity_my_paper_account(request: Request) -> dict[str, Any]:
+    if identity_sessions is None or user_paper_accounts is None:
+        raise HTTPException(503, "User account store unavailable")
+    try:
+        return identity.account_for_session(
+            user_paper_accounts, identity_sessions, request.headers.get("authorization", "")
+        )
+    except identity.IdentityError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except PyMongoError as exc:
+        raise HTTPException(503, "User account store unavailable") from exc
+
+
+@app.post("/api/identity/logout")
+def identity_logout(request: Request) -> dict[str, bool]:
+    if identity_sessions is None:
+        raise HTTPException(503, "Session store unavailable")
+    try:
+        identity.revoke_session(identity_sessions, request.headers.get("authorization", ""))
+        return {"revoked": True}
+    except identity.IdentityError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except PyMongoError as exc:
+        raise HTTPException(503, "Session store unavailable") from exc
 
 
 @app.get("/api/health")

@@ -50,3 +50,11 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - Added read-only `/api/broker/capabilities` and `/api/analytics/periods`.
 - Added unit tests; execution deferred.
 - No deployment requested or initiated in this backend milestone.
+
+## Backend milestone — simulated execution and reconciliation
+- `backend/demo_execution.py`: network-free demo fills, bounded adverse slippage, spread-cost estimate and process-local duplicate-request detection.
+- `backend/reconciliation.py`: read-only balance/trade/position consistency checks.
+- `GET /api/diagnostics/reconciliation`: diagnostic report; does not modify balances.
+- `backend/test_demo_execution.py`: deterministic unit tests added, not yet executed.
+- No Vercel or backend deployment requested or initiated.
+- **Next critical milestone:** durable append-only ledger, atomic balance mutations and broker demo reconciliation. Existing shared MongoDB state must not be used for real capital.

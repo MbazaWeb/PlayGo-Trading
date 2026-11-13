@@ -25,7 +25,7 @@ class StrategyTests(unittest.TestCase):
 
     def test_paper_only_configuration(self):
         self.assertEqual(agents.options()["execution"], "PAPER")
-        self.assertEqual(agents.options()["feed"], "SYNTHETIC")
+        self.assertEqual(agents.options()["configured_feed"], "SYNTHETIC")
 
     def test_auto_cycle_paused_does_not_place_order(self):
         main.state.clear()

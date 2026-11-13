@@ -22,6 +22,7 @@ import settlement
 import settlement_audit
 import access_policy
 import identity
+import company
 from demo_execution import DemoOrderError
 
 from dotenv import load_dotenv
@@ -808,15 +809,7 @@ class RegisterIdentity(BaseModel):
 
 @app.post("/api/identity/register")
 def identity_register(payload: RegisterIdentity) -> dict[str, str]:
-    """Local development only. Does not expose or migrate the shared trading state."""
-    if identity_users is None:
-        raise HTTPException(503, "Identity store unavailable")
-    try:
-        return identity.register(identity_users, **payload.model_dump())
-    except identity.IdentityError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except PyMongoError as exc:
-        raise HTTPException(503, "Identity store unavailable") from exc
+    raise HTTPException(403, "Self-registration disabled. Staff must be provisioned by PlayGo.")
 
 
 @app.post("/api/identity/login")
@@ -833,16 +826,18 @@ def identity_login(payload: RegisterIdentity) -> dict[str, Any]:
 
 @app.get("/api/identity/me/paper-account")
 def identity_my_paper_account(request: Request) -> dict[str, Any]:
-    if identity_sessions is None or user_paper_accounts is None:
-        raise HTTPException(503, "User account store unavailable")
+    """Compatibility route: company ownership only; no personal balances."""
+    if identity_sessions is None or identity_users is None:
+        raise HTTPException(503, "Identity store unavailable")
     try:
-        return identity.account_for_session(
-            user_paper_accounts, identity_sessions, request.headers.get("authorization", "")
-        )
-    except identity.IdentityError as exc:
-        raise HTTPException(401, str(exc)) from exc
-    except PyMongoError as exc:
-        raise HTTPException(503, "User account store unavailable") from exc
+        staff_id = identity.verify_session(identity_sessions, request.headers.get("authorization", ""))
+        staff = identity_users.find_one({"_id": staff_id})
+        if not staff:
+            raise HTTPException(403, "Staff unavailable")
+        context = company.require_permission(staff, "read")
+        return {**context, "mode": "PAPER", "personal_account": False}
+    except (identity.IdentityError, company.CompanyAccessError) as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @app.post("/api/identity/logout")
@@ -856,6 +851,26 @@ def identity_logout(request: Request) -> dict[str, bool]:
         raise HTTPException(401, str(exc)) from exc
     except PyMongoError as exc:
         raise HTTPException(503, "Session store unavailable") from exc
+
+
+@app.get("/api/company/migration-preview")
+def company_migration_preview(request: Request) -> dict[str, Any]:
+    if any(x is None for x in (identity_sessions, identity_users, state_collection, accounting_collection, accounting_journals)):
+        raise HTTPException(503, "Company data unavailable")
+    try:
+        staff_id = identity.verify_session(identity_sessions, request.headers.get("authorization", ""))
+        staff = identity_users.find_one({"_id": staff_id})
+        if not staff:
+            raise HTTPException(403, "Staff unavailable")
+        company.require_permission(staff, "staff")
+        legacy = state_collection.find_one({"_id": STATE_ID})
+        book = accounting_collection.find_one({"_id": accounting.ACCOUNT_ID})
+        count = accounting_journals.count_documents({"account_id": accounting.ACCOUNT_ID, "kind": {"$ne": "REVERSAL_CLAIM"}})
+        return company.migration_preview(legacy or {}, book, count)
+    except (identity.IdentityError, company.CompanyAccessError) as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except PyMongoError as exc:
+        raise HTTPException(503, "Migration preview unavailable") from exc
 
 
 @app.get("/api/health")

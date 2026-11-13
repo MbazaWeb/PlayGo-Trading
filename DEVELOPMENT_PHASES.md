@@ -138,3 +138,11 @@ All phases remain **paper trading only**. Do not interpret sampled synthetic quo
 - `backend/test_company.py` covers company identity, role permissions, staff rejection and fail-closed migration preview.
 - **Not yet complete:** role authorization is not yet enforced on all legacy trading/accounting endpoints; no company owner bootstrap or staff provisioning workflow exists; shared paper trading state remains. This is a safe architecture transition, not a completed authorization cutover.
 - Do not create per-user trading accounts or auto-migrate legacy capital. No deployment initiated.
+
+## Current operating model — single PlayGo owner + autonomous paper bots
+- Exactly **one human login**, the PlayGo Tanzania Limited OWNER. No customer accounts, no staff self-registration, no separate bot identities.
+- One-time localhost-only `POST /api/identity/bootstrap-owner` requires a strong `PLAYGO_OWNER_BOOTSTRAP_SECRET` (minimum 32 characters) sent via `X-PlayGo-Bootstrap-Secret` header. Keep this secret server-side; disable it after initial setup. Public `/api/identity/register` stays disabled.
+- Database unique partial index on `company_id=PLAYGO_TANZANIA_LIMITED` prevents duplicate company owners even under concurrent requests.
+- Owner login uses the existing `/api/identity/login` and 8-hour opaque session token. Existing legacy identities without company ownership are not automatically promoted.
+- AI agents and the bot are internal software components, not users; they must operate under the single company paper account and existing risk supervisor. No live-money execution.
+- **Incomplete:** the legacy trading and accounting endpoints still require owner-session authorization integration; bot lifecycle and audit attribution need review; the existing shared development trading state is not yet migrated. Do not expose publicly or deploy.

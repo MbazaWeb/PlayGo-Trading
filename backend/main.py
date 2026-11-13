@@ -151,6 +151,10 @@ app.add_middleware(
 async def protect_write_endpoints(request: Request, call_next):
     """Until user authentication exists, reject writes outside local development."""
     if request.method == "POST" and request.url.path.startswith("/api/"):
+        origin = request.headers.get("origin")
+        allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+        if origin and origin not in allowed_origins:
+            return JSONResponse(status_code=403, content={"detail": "Untrusted browser origin"})
         local_mode = os.getenv("PLAYGO_ENV", "local").lower() == "local"
         peer = request.client.host if request.client else ""
         if not local_mode or peer not in ("127.0.0.1", "::1", "testclient"):
@@ -195,7 +199,7 @@ def snapshot() -> dict[str, Any]:
         "positions": state["positions"],
         "trades": state["trades"][-30:][::-1],
         "logs": state["logs"][:30],
-        "quotes": state["quotes"],
+        "quotes": {k: v for k, v in state["quotes"].items() if k != "USDJPY" or state.get("feed_type") == "SYNTHETIC"},
         "agents": [
             "Scanner",
             "Strategy",
@@ -221,6 +225,8 @@ def status() -> dict[str, Any]:
 
 @app.post("/api/start")
 def start() -> dict[str, Any]:
+    if equity() <= state["day_start_balance"] * 0.98:
+        raise HTTPException(403, "Daily drawdown limit is active; cannot restart entries")
     previous_state = deepcopy(state)
     state["paused"] = False
     log("Supervisor", "Paper engine enabled; synthetic feed only")

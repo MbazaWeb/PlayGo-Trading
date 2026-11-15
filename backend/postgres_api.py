@@ -17,6 +17,7 @@ import psycopg
 import postgres_identity
 import postgres_ledger
 import postgres_state
+import postgres_cycle
 import postgres_accounting
 import postgres_demo_orders
 from demo_execution import DemoOrderError
@@ -211,5 +212,27 @@ def paper_control(payload: PaperControlRequest,
         return {"mode": "PAPER", "state": state}
     except postgres_ledger.StaleStateError as exc:
         raise HTTPException(409, "State revision changed; reload and retry") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class PaperCycleRequest(BaseModel):
+    expected_revision: int
+
+
+@app.post("/api/auto-cycle")
+def synthetic_cycle(payload: PaperCycleRequest,
+                    authorization: str = Header(default="")):
+    """One synthetic observation cycle; does not place or close orders."""
+    owner(authorization)
+    try:
+        with connect() as conn:
+            state = postgres_cycle.run_cycle(
+                conn, expected_revision=payload.expected_revision)
+        return {"mode": "PAPER", "execution": "OBSERVATION_ONLY", "state": state}
+    except postgres_ledger.StaleStateError as exc:
+        raise HTTPException(409, "State revision changed; reload and retry") from exc
+    except postgres_cycle.CycleCooldown as exc:
+        raise HTTPException(429, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

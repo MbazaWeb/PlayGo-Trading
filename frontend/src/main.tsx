@@ -9,6 +9,7 @@ type Quote={bid:number;ask:number;pip:number;spread:number};
 type PaperState={revision:number;balance:number;starting_balance:number;paused:boolean;feed_type:string;ticks:number;last_cycle_at:string|null;quotes:Record<string,Quote>;positions:unknown[];trades:unknown[];logs:{id:string;time:string;agent:string;message:string}[];risk_lock_reason:string|null;loss_streak:number};
 type Order={client_order_id:string;status:string;request:{pair:string;side:string;units:number;bid:string;ask:string;slippage_pips:string};fill:Record<string,unknown>|null;created_at:string;updated_at:string};
 type OrderPage={mode:string;total:number;limit:number;offset:number;orders:Order[]};
+type Analytics={mode:string;feed_type:string;paper:{balance:number;starting_balance:number;revision:number;observations:number;paused:boolean;risk_lock_reason:string|null;open_positions:number;closed_trade_records:number};demo_orders:{total:number;by_status:Record<string,number>;by_pair:Record<string,number>};performance:{realized_pnl:null;unrealized_pnl:null;win_rate:null;max_drawdown:null;equity_curve:null;availability:string};disclaimer:string};
 const showDate=(value:string)=>{const date=new Date(value);return Number.isNaN(date.getTime())?value:date.toLocaleString()};
 async function request(path:string,token='',method='GET',body?:unknown){
  const r=await fetch(API+path,{method,cache:'no-store',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body)});
@@ -22,12 +23,13 @@ function App(){
  const [state,setState]=useState<PaperState|null>(null),[account,setAccount]=useState<{role:string;mode:string}|null>(null);
  const [orders,setOrders]=useState<Order[]>([]),[pair,setPair]=useState('EURUSD'),[side,setSide]=useState('BUY'),[units,setUnits]=useState(1000);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
- const [tab,setTab]=useState<'dashboard'|'history'>('dashboard');
+ const [tab,setTab]=useState<'dashboard'|'history'|'analytics'>('dashboard');
  const [history,setHistory]=useState<OrderPage|null>(null),[historyBusy,setHistoryBusy]=useState(false),[historyError,setHistoryError]=useState('');
  const [historyPage,setHistoryPage]=useState(0),[historyPair,setHistoryPair]=useState(''),[historySide,setHistorySide]=useState(''),[historyStatus,setHistoryStatus]=useState(''),[dateFrom,setDateFrom]=useState(''),[dateTo,setDateTo]=useState('');
  const [selectedOrder,setSelectedOrder]=useState<Order|null>(null);
+ const [analytics,setAnalytics]=useState<Analytics|null>(null),[analyticsBusy,setAnalyticsBusy]=useState(false),[analyticsError,setAnalyticsError]=useState('');
  const pageSize=20;
- const logoutLocal=useCallback(()=>{sessionStorage.removeItem(KEY);setToken('');setState(null);setAccount(null);setOrders([]);setHistory(null);setSelectedOrder(null);setPassword('')},[]);
+ const logoutLocal=useCallback(()=>{sessionStorage.removeItem(KEY);setToken('');setState(null);setAccount(null);setOrders([]);setHistory(null);setSelectedOrder(null);setAnalytics(null);setPassword('')},[]);
  const refresh=useCallback(async(t=token)=>{
   if(!t||!API)return;
   try{
@@ -52,6 +54,14 @@ function App(){
   finally{setHistoryBusy(false)}
  },[token,historyPage,historyPair,historySide,historyStatus,dateFrom,dateTo,logoutLocal]);
  useEffect(()=>{if(tab==='history')void loadHistory()},[tab,loadHistory]);
+ const loadAnalytics=useCallback(async()=>{
+  if(!token)return;
+  setAnalyticsBusy(true);setAnalyticsError('');
+  try{setAnalytics(await request('/api/analytics/overview',token))}
+  catch(e){if((e as Error).message==='SESSION_EXPIRED')logoutLocal();else setAnalyticsError((e as Error).message)}
+  finally{setAnalyticsBusy(false)}
+ },[token,logoutLocal]);
+ useEffect(()=>{if(tab==='analytics')void loadAnalytics()},[tab,loadAnalytics]);
  async function openOrder(id:string){setHistoryError('');try{setSelectedOrder(await request('/api/demo/orders/'+encodeURIComponent(id),token))}catch(e){if((e as Error).message==='SESSION_EXPIRED')logoutLocal();else setHistoryError((e as Error).message)}}
  async function login(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');
   try{const d=await request('/api/identity/login','','POST',{username,password});if(typeof d.access_token!=='string')throw Error('Missing session token');sessionStorage.setItem(KEY,d.access_token);setToken(d.access_token);setPassword('')}
@@ -67,8 +77,15 @@ function App(){
  if(!API)return <main className="simpleApp"><section className="panel"><h2>Backend URL not configured</h2><p>Set VITE_API_URL to the PostgreSQL FastAPI origin.</p></section></main>;
  if(!token)return <main className="simpleApp"><header className="simpleHeader"><div className="brand"><div className="logo">P</div><h1>PlayGo AI Trading</h1></div><span className="pill">PAPER ONLY</span></header><section className="panel" style={{maxWidth:460,margin:'70px auto',padding:28}}><h2>Owner sign in</h2><p>Supabase PostgreSQL · Private owner access</p><form onSubmit={login} style={{display:'grid',gap:16,marginTop:20}}><label>Username<input required autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)}/></label><label>Password<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button className="primary" disabled={busy}>{busy?'Signing in…':'Sign in'}</button></form>{error&&<p className="error" role="alert">{error}</p>}<small>No public registration. Demo trading only.</small></section></main>;
  return <main className="simpleApp"><header className="simpleHeader"><div className="brand"><div className="logo">P</div><div><h1>PlayGo AI Trading</h1><small>POSTGRESQL PAPER ACCOUNT</small></div></div><div className="headerRight"><span className="pill">PAPER ONLY</span><button className="secondary" disabled={busy} onClick={logout}>Sign out</button></div></header>
- <nav className="historyNav" aria-label="Dashboard sections"><button type="button" className={tab==='dashboard'?'selected':''} onClick={()=>setTab('dashboard')}>Dashboard</button><button type="button" className={tab==='history'?'selected':''} onClick={()=>setTab('history')}>Order history</button></nav>
- {tab==='history'?<div className="viewContent"><div className="viewHeading"><div><h2>DEMO order history</h2><p>Persistent PostgreSQL records · simulated execution only</p></div><button className="secondary" disabled={historyBusy} onClick={()=>void loadHistory()}>Refresh history</button></div>
+ <nav className="historyNav" aria-label="Dashboard sections"><button type="button" className={tab==='dashboard'?'selected':''} onClick={()=>setTab('dashboard')}>Dashboard</button><button type="button" className={tab==='history'?'selected':''} onClick={()=>setTab('history')}>Order history</button><button type="button" className={tab==='analytics'?'selected':''} onClick={()=>setTab('analytics')}>Analytics</button></nav>
+ {tab==='analytics'?<div className="viewContent"><div className="viewHeading"><div><h2>Trading analytics</h2><p>Authoritative paper account and persisted DEMO activity</p></div><button className="secondary" disabled={analyticsBusy} onClick={()=>void loadAnalytics()}>Refresh analytics</button></div>
+ {analyticsError&&<div className="error" role="alert">{analyticsError}</div>}
+ {analyticsBusy&&!analytics?<section className="panel"><p>Loading analytics…</p></section>:analytics&&<>
+ <div className="simpleStats"><article><small>Paper balance</small><strong>{money(analytics.paper.balance)}</strong></article><article><small>Starting capital</small><strong>{money(analytics.paper.starting_balance)}</strong></article><article><small>DEMO orders</small><strong>{analytics.demo_orders.total}</strong></article><article><small>Synthetic observations</small><strong>{analytics.paper.observations}</strong></article></div>
+ <section className="panel"><div className="panelTitle"><h3>Simulated order activity</h3><span className="pill">DEMO ONLY</span></div><div className="analyticsColumns"><div><h4>By status</h4>{Object.entries(analytics.demo_orders.by_status).length===0?<p>No orders yet</p>:Object.entries(analytics.demo_orders.by_status).map(([name,count])=><div className="simpleItem" key={name}><b>{name}</b><span>{count}</span></div>)}</div><div><h4>By pair</h4>{Object.entries(analytics.demo_orders.by_pair).length===0?<p>No orders yet</p>:Object.entries(analytics.demo_orders.by_pair).map(([name,count])=><div className="simpleItem" key={name}><b>{name}</b><span>{count}</span></div>)}</div></div></section>
+ <section className="panel"><div className="panelTitle"><h3>Performance metrics</h3><span>Not yet available</span></div><p>Realized P&amp;L, unrealized P&amp;L, win rate, equity curve, and maximum drawdown require a verified position lifecycle and accounting settlement. They are intentionally not estimated from DEMO fills.</p><div className="analyticsUnavailable"><span>Realized P&amp;L: N/A</span><span>Unrealized P&amp;L: N/A</span><span>Win rate: N/A</span><span>Maximum drawdown: N/A</span></div><small>{analytics.disclaimer}</small></section>
+ <section className="panel"><div className="panelTitle"><h3>Paper risk snapshot</h3></div><div className="analyticsColumns"><div className="simpleItem"><b>Engine</b><span>{analytics.paper.paused?'PAUSED':'ENABLED'}</span></div><div className="simpleItem"><b>Open positions</b><span>{analytics.paper.open_positions}</span></div><div className="simpleItem"><b>Closed trade records</b><span>{analytics.paper.closed_trade_records}</span></div><div className="simpleItem"><b>Risk lock</b><span>{analytics.paper.risk_lock_reason||'None'}</span></div></div></section>
+ </>}</div>:tab==='history'?<div className="viewContent"><div className="viewHeading"><div><h2>DEMO order history</h2><p>Persistent PostgreSQL records · simulated execution only</p></div><button className="secondary" disabled={historyBusy} onClick={()=>void loadHistory()}>Refresh history</button></div>
  <section className="panel"><div className="panelTitle"><h3>Filters</h3><span>UTC dates</span></div><div className="historyFilters">
  <label>Pair<select value={historyPair} onChange={e=>{setHistoryPair(e.target.value);setHistoryPage(0)}}><option value="">All pairs</option><option>EURUSD</option><option>GBPUSD</option></select></label>
  <label>Direction<select value={historySide} onChange={e=>{setHistorySide(e.target.value);setHistoryPage(0)}}><option value="">All directions</option><option>BUY</option><option>SELL</option></select></label>

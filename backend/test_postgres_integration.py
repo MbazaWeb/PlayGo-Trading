@@ -71,6 +71,30 @@ class PostgresIntegrationTests(unittest.TestCase):
             postgres_accounting.post(self.conn, **dict(args, amount_cents=200))
         self.conn.rollback()
 
+    def test_realized_pnl_rejects_fabricated_trade_reference(self):
+        trade_id = "forged-" + uuid4().hex
+        with self.assertRaisesRegex(ValueError, "persisted closed-trade event"):
+            postgres_accounting.post(
+                self.conn, transaction_id="TRADE:" + trade_id,
+                kind="REALIZED_GAIN", amount_cents=100,
+                reference="CLOSED:" + trade_id)
+        self.conn.rollback()
+
+    def test_realized_pnl_matches_persisted_event(self):
+        import json
+        trade_id = "ci-trade-" + uuid4().hex
+        with self.conn.transaction():
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "insert into playgo_private.trade_events (event_id, trade_id, event_type, payload) values (%s, %s, %s, %s::jsonb)",
+                    ("CLOSED:" + trade_id, trade_id, "PAPER_TRADE_CLOSED",
+                     json.dumps({"trade": {"id": trade_id, "pnl": "2.50"}})))
+        posted = postgres_accounting.post(
+            self.conn, transaction_id="TRADE:" + trade_id,
+            kind="REALIZED_GAIN", amount_cents=250,
+            reference="CLOSED:" + trade_id)
+        self.assertEqual(posted["amount_cents"], 250)
+
     def test_accounting_reconciliation(self):
         result = postgres_accounting.reconcile(self.conn)
         self.assertTrue(result["consistent"], result["issues"])

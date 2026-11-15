@@ -113,7 +113,7 @@ def close_position(conn, *, position_id, expected_revision):
     _id(position_id)
     _revision(expected_revision)
     with conn.transaction():
-        previous = postgres_state.load(conn)
+        previous = _locked_state(conn)
         opened, closed = _find(previous, position_id)
         if closed is not None:
             return _result("CLOSED", closed, previous["revision"])

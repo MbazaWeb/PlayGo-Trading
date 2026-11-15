@@ -104,3 +104,26 @@ def get_signal(conn, signal_id):
         return None
     stored = _decode(row[0])
     return stored.get("decision")
+
+
+def list_signals(conn, *, limit=25, offset=0):
+    """Return immutable recorded decisions, newest first."""
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
+    if type(offset) is not int or not 0 <= offset <= 100000:
+        raise ValueError("offset must be between 0 and 100000")
+    with conn.cursor() as cur:
+        cur.execute(
+            """select count(*) from playgo_private.documents
+               where collection_name=%s and body->>'status' in ('ACCEPTED','REJECTED')""",
+            (COLLECTION,))
+        total = cur.fetchone()[0]
+        cur.execute(
+            """select body from playgo_private.documents
+               where collection_name=%s and body->>'status' in ('ACCEPTED','REJECTED')
+               order by updated_at desc, document_id desc limit %s offset %s""",
+            (COLLECTION, limit, offset))
+        decisions = [_decode(row[0])["decision"] for row in cur.fetchall()]
+    return {"mode": "PAPER", "execution": "VALIDATION_ONLY",
+            "total": total, "limit": limit, "offset": offset,
+            "signals": decisions}

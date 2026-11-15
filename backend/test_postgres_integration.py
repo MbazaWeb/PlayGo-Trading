@@ -6,7 +6,7 @@ not explicitly configured. The test database is discarded after each job.
 import os
 import unittest
 from uuid import uuid4
-from urllib.parse import urlsplit
+from psycopg.conninfo import conninfo_to_dict
 
 import psycopg
 
@@ -22,8 +22,7 @@ class PostgresIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         dsn = os.environ["TEST_DATABASE_URL"]
-        parsed = urlsplit(dsn)
-        host = (parsed.hostname or "").lower()
+        host = conninfo_to_dict(dsn).get("host", "").lower()
         local = host in ("localhost", "127.0.0.1", "::1")
         if not local:
             # Only the dedicated PlayGo Trading Test project is permitted.

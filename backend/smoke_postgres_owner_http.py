@@ -46,7 +46,11 @@ def call(path, *, method="GET", data=None, token=None):
         with urlopen(req, timeout=20) as response:
             return response.status, json.load(response)
     except HTTPError as exc:
-        return exc.code, json.load(exc)
+        raw = exc.read().decode('utf-8', errors='replace')
+        try:
+            return exc.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return exc.code, {'detail': 'Non-JSON HTTP error response'}
 
 
 def expect(status, expected, label):
@@ -80,6 +84,8 @@ def main():
                 time.sleep(0.5)
         else:
             raise RuntimeError("API startup timeout")
+        if status != 200:
+            raise RuntimeError(f"PostgreSQL health check failed: HTTP {status}; check database reachability")
         expect(status, 200, "PostgreSQL API started")
         status, result = call("/api/identity/login", method="POST",
                               data={"username": username, "password": password})

@@ -16,6 +16,7 @@ import psycopg
 
 import postgres_identity
 import postgres_ledger
+import postgres_state
 import postgres_accounting
 import postgres_demo_orders
 from demo_execution import DemoOrderError
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
             if cur.fetchone()[0] is None:
                 raise RuntimeError("Supabase state schema has not been applied")
         postgres_accounting.initialize(conn)
+        postgres_state.initialize(conn)
     yield
 
 
@@ -184,3 +186,11 @@ def recover_demo_orders(limit: int = 50, authorization: str = Header(default="")
         raise HTTPException(400, "Invalid limit")
     with connect() as conn:
         return postgres_demo_orders.recover_pending(conn, limit)
+
+
+@app.get("/api/state")
+def paper_state(authorization: str = Header(default="")):
+    """Return the authoritative persisted paper state; no public write route."""
+    owner(authorization)
+    with connect() as conn:
+        return {"mode": "PAPER", "state": postgres_state.load(conn)}

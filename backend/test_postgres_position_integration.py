@@ -321,6 +321,90 @@ class RealPostgresPositionTests(unittest.TestCase):
             self.assertEqual(postgres_state.load(conn), before)
             self.assertEqual(postgres_accounting.reconcile(conn), baseline)
 
+    def test_concurrent_close_is_blocked_during_atomic_settlement(self):
+        """Competing close cannot settle while another transaction owns the row.
+
+        The first close is deliberately rolled back; no TEST data persists.
+        A subsequent committed-retry race remains a separate validation gate.
+        """
+        dsn = os.getenv("DATABASE_URL", "")
+        self.assertTrue(dsn)
+        config = conninfo_to_dict(dsn)
+        self.assertEqual(config.get("user"), TEST_USER)
+        self.assertEqual(config.get("host"), TEST_HOST)
+        self.assertEqual(str(config.get("port", "5432")), "5432")
+        self.assertEqual(config.get("dbname"), "postgres")
+        position_id = "cc_" + uuid4().hex
+        from copy import deepcopy
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        with psycopg.connect(dsn, connect_timeout=8) as first:
+            with psycopg.connect(dsn, connect_timeout=8) as second:
+                before = postgres_state.load(first)
+                baseline = postgres_accounting.reconcile(first)
+                self.assertTrue(baseline["consistent"])
+                self.assertEqual(baseline["balances_cents"]["CASH"],
+                                 round(before["balance"] * 100))
+                self.assertFalse(before["positions"])
+                first.rollback()
+                second.rollback()
+                try:
+                    with first.transaction():
+                        prepared = deepcopy(before)
+                        prepared["paused"] = False
+                        prepared["risk_lock_reason"] = None
+                        prepared["loss_streak"] = 0
+                        prepared["day_start_date"] = datetime.now(timezone.utc).date().isoformat()
+                        prepared["day_start_balance"] = before["balance"]
+                        revision = postgres_state.commit(first, before, prepared)
+                        entry = Decimal(str(prepared["quotes"]["EURUSD"]["ask"]))
+                        opened = lifecycle.open_position(
+                            first, position_id=position_id,
+                            expected_revision=revision,
+                            pair="EURUSD", side="BUY", units=1000,
+                            stop_loss=str(entry - Decimal("0.005")))
+                        closed = lifecycle.close_position(
+                            first, position_id=position_id,
+                            expected_revision=opened["state_revision"])
+                        self.assertEqual(closed["status"], "CLOSED")
+                        with self.assertRaises(LockNotAvailable):
+                            with second.transaction():
+                                with second.cursor() as cur:
+                                    cur.execute("set local lock_timeout = '1000ms'")
+                                lifecycle.close_position(
+                                    second, position_id=position_id,
+                                    expected_revision=opened["state_revision"])
+                        # One and only one settlement is visible to the
+                        # first transaction; the second wrote nothing.
+                        with first.cursor() as cur:
+                            cur.execute(
+                                "select count(*) from playgo_private.trade_events "
+                                "where event_id=%s", ("CLOSED:" + position_id,))
+                            self.assertEqual(cur.fetchone()[0], 1)
+                            cur.execute(
+                                "select count(*) from playgo_private.accounting_journals "
+                                "where transaction_id=%s", ("TRADE:" + position_id,))
+                            self.assertEqual(cur.fetchone()[0], 1)
+                        accounting = postgres_accounting.reconcile(first)
+                        state = postgres_state.load(first)
+                        self.assertTrue(accounting["consistent"])
+                        self.assertEqual(accounting["balances_cents"]["CASH"],
+                                         round(state["balance"] * 100))
+                        raise _Rollback()
+                except _Rollback:
+                    pass
+                self.assertEqual(postgres_state.load(first), before)
+                self.assertEqual(postgres_accounting.reconcile(first), baseline)
+                with second.cursor() as cur:
+                    cur.execute(
+                        "select count(*) from playgo_private.trade_events "
+                        "where event_id=%s", ("CLOSED:" + position_id,))
+                    self.assertEqual(cur.fetchone()[0], 0)
+                    cur.execute(
+                        "select count(*) from playgo_private.accounting_journals "
+                        "where transaction_id=%s", ("TRADE:" + position_id,))
+                    self.assertEqual(cur.fetchone()[0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

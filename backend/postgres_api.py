@@ -194,3 +194,22 @@ def paper_state(authorization: str = Header(default="")):
     owner(authorization)
     with connect() as conn:
         return {"mode": "PAPER", "state": postgres_state.load(conn)}
+
+
+class PaperControlRequest(BaseModel):
+    expected_revision: int
+    paused: bool
+
+
+@app.post("/api/state/control")
+def paper_control(payload: PaperControlRequest,
+                  authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            state = postgres_state.set_paused(conn, **payload.model_dump())
+        return {"mode": "PAPER", "state": state}
+    except postgres_ledger.StaleStateError as exc:
+        raise HTTPException(409, "State revision changed; reload and retry") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc

@@ -77,3 +77,31 @@ def commit(conn, previous, proposed):
     if type(proposed.get("revision")) is not int or proposed["revision"] != previous["revision"]:
         raise ValueError("Expected revision mismatch")
     return postgres_ledger.commit_state(conn, previous, proposed)
+
+
+def set_paused(conn, *, expected_revision: int, paused: bool):
+    """Owner control with optimistic concurrency; no implicit engine execution."""
+    if type(expected_revision) is not int or expected_revision < 0:
+        raise ValueError("Invalid expected revision")
+    if type(paused) is not bool:
+        raise ValueError("Invalid paused flag")
+    previous = load(conn)
+    if previous["revision"] != expected_revision:
+        raise postgres_ledger.StaleStateError("Paper state changed; reload before retrying")
+    if previous["paused"] == paused:
+        return previous
+    proposed = deepcopy(previous)
+    proposed["paused"] = paused
+    # Unpausing must never override an existing risk lock.
+    if not paused and (proposed.get("risk_lock_reason") or proposed.get("loss_streak", 0) >= 3):
+        raise ValueError("Risk lock prevents starting paper trading")
+    proposed.setdefault("logs", []).insert(0, {
+        "id": "control:" + str(expected_revision + 1),
+        "time": datetime.now(timezone.utc).isoformat(),
+        "agent": "Supervisor",
+        "message": "Paper trading paused" if paused else "Paper trading enabled",
+    })
+    proposed["logs"] = proposed["logs"][:100]
+    revision = commit(conn, previous, proposed)
+    proposed["revision"] = revision
+    return proposed

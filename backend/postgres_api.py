@@ -24,6 +24,7 @@ import postgres_demo_orders
 import postgres_analytics
 import postgres_positions
 import postgres_position_lifecycle
+import postgres_signal_store
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -359,3 +360,53 @@ def synthetic_cycle(payload: PaperCycleRequest,
         raise HTTPException(429, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+class PaperSignalRequest(BaseModel):
+    signal_id: str
+    pair: str
+    side: str
+    confidence: str
+    timestamp: str
+    stop_loss: str
+
+
+@app.post("/api/paper/signals")
+def submit_paper_signal(payload: PaperSignalRequest,
+                        authorization: str = Header(default="")):
+    """Owner-authenticated signal audit; never submits a PAPER order."""
+    owner(authorization)
+    try:
+        with connect() as conn:
+            return postgres_signal_store.record_signal(
+                conn, signal=payload.model_dump())
+    except postgres_signal_store.SignalConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/paper/signals")
+def paper_signal_history(limit: int = 25, offset: int = 0,
+                         authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            return postgres_signal_store.list_signals(
+                conn, limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/paper/signals/{signal_id}")
+def paper_signal_detail(signal_id: str,
+                        authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            decision = postgres_signal_store.get_signal(conn, signal_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if decision is None:
+        raise HTTPException(404, "PAPER signal not found")
+    return decision

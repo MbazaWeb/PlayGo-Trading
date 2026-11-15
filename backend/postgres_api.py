@@ -13,6 +13,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 
 import postgres_identity
 import postgres_ledger
@@ -32,8 +33,14 @@ class Credentials(BaseModel):
 
 def connect():
     dsn = os.getenv("DATABASE_URL", "")
-    if not dsn.startswith(("postgresql://", "postgres://")):
-        raise RuntimeError("DATABASE_URL must be a server-side PostgreSQL DSN")
+    if not dsn:
+        raise RuntimeError("DATABASE_URL must be configured server-side")
+    try:
+        params = conninfo_to_dict(dsn)
+    except psycopg.ProgrammingError as exc:
+        raise RuntimeError("DATABASE_URL must be a valid PostgreSQL connection string") from exc
+    if not params.get("dbname") or not (params.get("host") or params.get("hostaddr")):
+        raise RuntimeError("DATABASE_URL requires an explicit database and host")
     return psycopg.connect(dsn, connect_timeout=8)
 
 

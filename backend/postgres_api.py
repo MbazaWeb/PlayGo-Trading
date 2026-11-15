@@ -26,6 +26,7 @@ import postgres_positions
 import postgres_position_lifecycle
 import postgres_signal_store
 import postgres_emergency_stop
+import postgres_automated_risk
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -432,3 +433,33 @@ def paper_automation_emergency_stop(payload: PaperEmergencyStopRequest,
         raise HTTPException(409, "State revision changed; reload and retry") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+class PaperAutomatedRiskPreview(BaseModel):
+    pair: str
+    side: str
+    units: int
+    entry_price: str
+    stop_loss: str
+
+
+@app.post("/api/paper/automation/risk-preview")
+def paper_automation_risk_preview(payload: PaperAutomatedRiskPreview,
+                                  authorization: str = Header(default="")):
+    """Owner-only observation; automation remains disabled regardless of eligibility.
+
+    Reads the authoritative state and reconciled accounting in a single
+    read-only repeatable-read transaction to avoid inconsistent snapshots.
+    """
+    owner(authorization)
+    with connect() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("set transaction isolation level repeatable read, read only")
+            state = postgres_state.load(conn)
+            accounting = postgres_accounting.reconcile(conn)
+            decision = postgres_automated_risk.assess(
+                state, accounting, proposal=payload.model_dump(),
+                automation_enabled=False)
+    return {"mode": "PAPER", "execution": "OBSERVATION_ONLY",
+            "state_revision": state["revision"], "decision": decision}

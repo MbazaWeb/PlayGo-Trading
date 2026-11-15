@@ -10,6 +10,7 @@ end-to-end tests are complete.
 Create `.env` at the repository root (never commit it):
 
 ```dotenv
+PLAYGO_ENV=local
 DATABASE_URL=postgresql://DB_USER:URL_ENCODED_PASSWORD@YOUR_SUPABASE_POOLER_HOST:5432/postgres?sslmode=require
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 PLAYGO_OWNER_BOOTSTRAP_SECRET=REPLACE_WITH_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
@@ -35,7 +36,7 @@ git pull origin main
 
 ## Bootstrap safety
 
-The one-time bootstrap endpoint is restricted to loopback connections and
+The one-time bootstrap endpoint is restricted to explicit `PLAYGO_ENV=local`, loopback connections and
 requires `X-PlayGo-Bootstrap-Secret`. It inserts a single owner enforced by
 a database uniqueness constraint. Never expose the bootstrap secret in the
 browser or deploy it as a `VITE_*` variable.

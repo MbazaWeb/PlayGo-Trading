@@ -77,6 +77,25 @@ def post(conn, *, transaction_id: str, kind: str, amount_cents: int,
                 if (existing[1], existing[2], existing[3]) != (kind, amount_cents, reference):
                     raise LedgerConflict("Transaction ID reused with different values")
                 return _journal(existing)
+            if kind in ("REALIZED_GAIN", "REALIZED_LOSS"):
+                from postgres_settlement import event_to_post
+                cur.execute(
+                    "select trade_id, event_type, payload from playgo_private.trade_events where event_id=%s",
+                    (reference,))
+                event_row = cur.fetchone()
+                if event_row is None:
+                    raise ValueError("Realized P&L requires a persisted closed-trade event")
+                trade_id, event_type, payload = event_row
+                data = _decode(payload)
+                expected = event_to_post({
+                    "_id": reference, "trade_id": trade_id,
+                    "event_type": event_type, "trade": data.get("trade", {}),
+                })
+                if expected is None or (
+                    expected["transaction_id"], expected["kind"],
+                    expected["amount_cents"], expected["reference"]
+                ) != (transaction_id, kind, amount_cents, reference):
+                    raise ValueError("Realized P&L does not match the closed-trade event")
             if kind == "REVERSAL":
                 cur.execute(
                     """select kind, amount_cents, lines

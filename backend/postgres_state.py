@@ -93,8 +93,14 @@ def set_paused(conn, *, expected_revision: int, paused: bool):
     proposed = deepcopy(previous)
     proposed["paused"] = paused
     # Unpausing must never override an existing risk lock.
-    if not paused and (proposed.get("risk_lock_reason") or proposed.get("loss_streak", 0) >= 3):
-        raise ValueError("Risk lock prevents starting paper trading")
+    if not paused:
+        today = datetime.now(timezone.utc).date().isoformat()
+        if proposed.get("day_start_date") != today:
+            raise ValueError("New UTC session requires a risk reset before starting")
+        if proposed.get("risk_lock_reason") or proposed.get("loss_streak", 0) >= 3:
+            raise ValueError("Risk lock prevents starting paper trading")
+        if proposed.get("balance", 0) <= proposed.get("day_start_balance", 0) * 0.98:
+            raise ValueError("Daily drawdown limit prevents starting paper trading")
     proposed.setdefault("logs", []).insert(0, {
         "id": "control:" + str(expected_revision + 1),
         "time": datetime.now(timezone.utc).isoformat(),

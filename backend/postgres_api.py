@@ -201,19 +201,6 @@ def demo_order_history(limit: int = 25, offset: int = 0, pair: str | None = None
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.get("/api/demo/orders/{client_order_id}")
-def demo_order_detail(client_order_id: str,
-                      authorization: str = Header(default="")):
-    owner(authorization)
-    try:
-        with connect() as conn:
-            order = postgres_demo_orders.get_order(conn, client_order_id)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if order is None:
-        raise HTTPException(404, "DEMO order not found")
-    return order
-
 @app.get("/api/demo/orders/pending")
 def pending_demo_orders(limit: int = 50, authorization: str = Header(default="")):
     owner(authorization)
@@ -231,6 +218,19 @@ def recover_demo_orders(limit: int = 50, authorization: str = Header(default="")
     with connect() as conn:
         return postgres_demo_orders.recover_pending(conn, limit)
 
+
+@app.get("/api/demo/orders/{client_order_id}")
+def demo_order_detail(client_order_id: str,
+                      authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            order = postgres_demo_orders.get_order(conn, client_order_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if order is None:
+        raise HTTPException(404, "DEMO order not found")
+    return order
 
 @app.get("/api/state")
 def paper_state(authorization: str = Header(default="")):

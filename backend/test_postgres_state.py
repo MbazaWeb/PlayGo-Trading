@@ -42,5 +42,35 @@ class StateTests(unittest.TestCase):
         mocked.assert_called_once()
 
 
+    @patch("postgres_state.commit", return_value=1)
+    @patch("postgres_state.load")
+    def test_pause_control_commits_revision(self, mocked_load, mocked_commit):
+        mocked_load.return_value = dict(self.previous, paused=False)
+        updated = postgres_state.set_paused(None, expected_revision=0, paused=True)
+        self.assertTrue(updated["paused"])
+        self.assertEqual(updated["revision"], 1)
+        mocked_commit.assert_called_once()
+
+    @patch("postgres_state.load")
+    def test_pause_control_rejects_stale_revision(self, mocked_load):
+        mocked_load.return_value = dict(self.previous, revision=3)
+        with self.assertRaises(postgres_state.postgres_ledger.StaleStateError):
+            postgres_state.set_paused(None, expected_revision=2, paused=True)
+
+    @patch("postgres_state.load")
+    def test_pause_control_cannot_override_risk_lock(self, mocked_load):
+        mocked_load.return_value = dict(self.previous, risk_lock_reason="DAILY_DRAWDOWN")
+        with self.assertRaises(ValueError):
+            postgres_state.set_paused(None, expected_revision=0, paused=False)
+
+    @patch("postgres_state.commit")
+    @patch("postgres_state.load")
+    def test_pause_control_is_idempotent(self, mocked_load, mocked_commit):
+        mocked_load.return_value = dict(self.previous)
+        updated = postgres_state.set_paused(None, expected_revision=0, paused=True)
+        self.assertEqual(updated["revision"], 0)
+        mocked_commit.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

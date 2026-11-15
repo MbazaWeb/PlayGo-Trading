@@ -7,7 +7,7 @@ idempotency. No live-money payment rails exist here.
 import json
 from datetime import datetime
 
-from accounting import (
+from accounting_rules import (
     ACCOUNT_ID, ACCOUNTS, NORMAL, InsufficientFunds, LedgerConflict,
     apply_lines, journal_lines, opening_account,
 )

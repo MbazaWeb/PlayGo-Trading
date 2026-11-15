@@ -41,11 +41,39 @@ def _result(status, position, revision):
             "state_revision": revision}
 
 
+def _locked_state(conn):
+    """Serialize PAPER lifecycle requests before reading state/idempotency."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """select revision from playgo_private.documents
+               where collection_name=%s and document_id=%s for update""",
+            (postgres_ledger.COLLECTION, postgres_ledger.STATE_ID))
+        if cur.fetchone() is None:
+            raise RuntimeError("Paper trading state has not been initialized")
+    return postgres_state.load(conn)
+
+
+def _assert_accounting_aligned(conn, state):
+    """Fail closed when journal replay or PAPER cash is inconsistent."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """select 1 from playgo_private.documents
+               where collection_name=%s and document_id=%s for update""",
+            (postgres_accounting.COLLECTION, postgres_accounting.ACCOUNT_ID))
+        if cur.fetchone() is None:
+            raise pricing.RiskRejected("PAPER accounting is not initialized")
+    result = postgres_accounting.reconcile(conn)
+    if not result["consistent"] or result["balances_cents"]["CASH"] != round(
+        float(state["balance"]) * 100
+    ):
+        raise pricing.RiskRejected("PAPER accounting reconciliation failed")
+
+
 def open_position(conn, *, position_id, expected_revision, pair, side, units, stop_loss):
     _id(position_id)
     _revision(expected_revision)
     with conn.transaction():
-        previous = postgres_state.load(conn)
+        previous = _locked_state(conn)
         opened, closed = _find(previous, position_id)
         if opened or closed:
             if opened and all((opened.get(k) == v for k, v in (
@@ -64,6 +92,7 @@ def open_position(conn, *, position_id, expected_revision, pair, side, units, st
         if side not in ("BUY", "SELL"):
             raise pricing.RiskRejected("Invalid side")
         entry = quote["ask"] if side == "BUY" else quote["bid"]
+        _assert_accounting_aligned(conn, previous)
         assessment = pricing.validate_open(
             previous, pair=pair, side=side, units=units,
             entry_price=entry, stop_loss=stop_loss)

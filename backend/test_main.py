@@ -14,6 +14,16 @@ class FakeCollection:
     documents = {}
     fail_writes = False
 
+    def create_index(self, *_args, **_kwargs):
+        return "fake_index"
+
+    def update_one(self, query, update, upsert=False):
+        key = query["_id"]
+        if key not in self.documents and upsert:
+            self.documents[key] = {"_id": key, **deepcopy(update.get("$setOnInsert", {}))}
+        elif key in self.documents and "$set" in update:
+            self.documents[key].update(deepcopy(update["$set"]))
+
     def find_one(self, query):
         document = self.documents.get(query["_id"])
         return deepcopy(document) if document else None
@@ -67,13 +77,21 @@ class MongoPersistenceTests(unittest.TestCase):
                     "MONGODB_DATABASE": "playgo_test",
                 },
             ), patch.object(main, "MongoClient", FakeMongoClient):
-                async with main.lifespan(main.app):
-                    main.tick()
-                    self.assertEqual(main.state["ticks"], 1)
+                def fake_commit(_state_collection, _ledger_collection, previous, current):
+                    revision = previous["revision"] + 1
+                    FakeCollection.documents[main.STATE_ID] = {
+                        "_id": main.STATE_ID, **deepcopy(current), "revision": revision,
+                    }
+                    return revision
 
-                main.state["ticks"] = 99
-                async with main.lifespan(main.app):
-                    self.assertEqual(main.state["ticks"], 1)
+                with patch.object(main.ledger, "commit_state", side_effect=fake_commit):
+                    async with main.lifespan(main.app):
+                        main.tick()
+                        self.assertEqual(main.state["ticks"], 1)
+
+                    main.state["ticks"] = 99
+                    async with main.lifespan(main.app):
+                        self.assertEqual(main.state["ticks"], 1)
 
         asyncio.run(run())
 

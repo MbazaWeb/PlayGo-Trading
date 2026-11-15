@@ -102,3 +102,22 @@ body{min-width:320px;line-height:1.5;-webkit-font-smoothing:antialiased}
  .simpleTableHead,.simpleTableRow{grid-template-columns:minmax(82px,1.2fr) repeat(2,minmax(68px,1fr));font-size:12px;padding:12px 2px}
  .simpleApp .panelTitle h3{font-size:15px}
 }
+
+
+/* Phase 4: PostgreSQL-backed order history */
+.historyNav{display:flex;gap:8px;padding:6px;border-radius:15px;background:rgba(24,39,64,.72);border:1px solid rgba(157,187,235,.16);margin:0 0 24px}
+.historyNav button{flex:1;background:transparent;color:#aebfda;border-radius:10px;min-height:45px}
+.historyNav button.selected{background:#315da8;color:white;box-shadow:0 4px 15px rgba(0,0,0,.15)}
+.historyFilters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.historyFilters label{min-width:0}
+.historyTable{overflow-x:auto}
+.historyTableHead,.historyTableRow{display:grid;grid-template-columns:1.6fr 1.3fr .65fr .75fr .65fr;gap:12px;align-items:center;min-width:650px;padding:12px 8px;border-bottom:1px solid rgba(157,187,235,.16);font-size:13px}
+.historyTableHead{color:#9fb2cf;font-size:11px;font-weight:700}
+.historyTableRow span{overflow-wrap:anywhere}
+.historyTableRow button{min-height:34px;padding:7px 10px}
+.orderDetails{display:grid;grid-template-columns:minmax(100px,.9fr) minmax(0,1.6fr);gap:12px;font-size:13px}
+.orderDetails dt{color:#a8bbd7}
+.orderDetails dd{margin:0;overflow-wrap:anywhere;font-weight:650}
+.fillDetails{max-height:240px;overflow:auto;padding:14px;border:1px solid rgba(157,187,235,.17);border-radius:10px;background:#0b162a;color:#d8e7ff;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:850px){.historyFilters{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:550px){.historyFilters{grid-template-columns:repeat(2,minmax(0,1fr))}.historyNav{margin-bottom:16px}.historyTableRow{font-size:12px}}

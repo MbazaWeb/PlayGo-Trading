@@ -40,7 +40,9 @@ def validate_open(state, *, pair, side, units, entry_price, stop_loss):
         raise RiskRejected("Prices must be positive")
     if side == "BUY" and stop >= price or side == "SELL" and stop <= price:
         raise RiskRejected("Stop loss must be on the losing side")
-    if state.get("automation_emergency_stop") is True:\n        raise RiskRejected("Emergency stop is engaged")\n    if state.get("paused", True) or state.get("risk_lock_reason"):
+    if state.get("automation_emergency_stop") is True:
+        raise RiskRejected("Emergency stop is engaged")
+    if state.get("paused", True) or state.get("risk_lock_reason"):
         raise RiskRejected("Paper engine is paused or risk locked")
     if state.get("loss_streak", 0) >= 3:
         raise RiskRejected("Loss streak lock")

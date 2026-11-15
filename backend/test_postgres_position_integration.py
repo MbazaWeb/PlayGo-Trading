@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import unittest
 from uuid import uuid4
+from unittest.mock import patch
 
 from dotenv import load_dotenv
 from psycopg.conninfo import conninfo_to_dict
@@ -49,8 +50,9 @@ class RealPostgresPositionTests(unittest.TestCase):
             before_accounting = postgres_accounting.reconcile(conn)
             self.assertTrue(before_accounting["consistent"],
                             "Baseline accounting reconciliation failed")
-            baseline_difference = (before_accounting["balances_cents"]["CASH"]
-                                   - round(before["balance"] * 100))
+            self.assertEqual(before_accounting["balances_cents"]["CASH"],
+                             round(before["balance"] * 100),
+                             "Baseline PAPER cash and ledger cash must agree")
             self.assertFalse(before["positions"],
                              "Test requires no existing positions")
             # Roll back every write even after all assertions succeed.
@@ -100,8 +102,8 @@ class RealPostgresPositionTests(unittest.TestCase):
                     self.assertEqual(len(current["trades"]), len(before["trades"]) + 1)
                     self.assertEqual(
                         accounting["balances_cents"]["CASH"] - round(current["balance"] * 100),
-                        baseline_difference,
-                        "Settlement must not change the historical ledger variance")
+                        0,
+                        "PAPER cash and ledger cash diverged during settlement")
                     with conn.cursor() as cur:
                         cur.execute(
                             "select count(*) from playgo_private.trade_events where event_id=%s",
@@ -127,6 +129,67 @@ class RealPostgresPositionTests(unittest.TestCase):
                 cur.execute(
                     "select count(*) from playgo_private.accounting_journals where transaction_id=%s",
                     ("TRADE:" + position_id,))
+                self.assertEqual(cur.fetchone()[0], 0)
+
+    def test_accounting_failure_rolls_back_closed_trade_and_event(self):
+        """A failed journal must never persist a CLOSED position or trade event."""
+        dsn = os.getenv("DATABASE_URL", "")
+        self.assertTrue(dsn, "DATABASE_URL is required")
+        config = conninfo_to_dict(dsn)
+        self.assertEqual(config.get("user"), TEST_USER)
+        self.assertEqual(config.get("host"), TEST_HOST)
+        self.assertEqual(str(config.get("port", "5432")), "5432")
+        self.assertEqual(config.get("dbname"), "postgres")
+        position_id = "fi_" + uuid4().hex
+        with psycopg.connect(dsn, connect_timeout=8) as conn:
+            before = postgres_state.load(conn)
+            before_accounting = postgres_accounting.reconcile(conn)
+            self.assertTrue(before_accounting["consistent"])
+            self.assertEqual(before_accounting["balances_cents"]["CASH"],
+                             round(before["balance"] * 100))
+            self.assertFalse(before["positions"], "Test requires no open positions")
+            try:
+                with conn.transaction():
+                    from copy import deepcopy
+                    from datetime import datetime, timezone
+                    from decimal import Decimal
+                    prepared = deepcopy(before)
+                    prepared["paused"] = False
+                    prepared["risk_lock_reason"] = None
+                    prepared["loss_streak"] = 0
+                    prepared["day_start_date"] = datetime.now(timezone.utc).date().isoformat()
+                    prepared["day_start_balance"] = before["balance"]
+                    revision = postgres_state.commit(conn, before, prepared)
+                    entry = Decimal(str(prepared["quotes"]["EURUSD"]["ask"]))
+                    opened = lifecycle.open_position(
+                        conn, position_id=position_id, expected_revision=revision,
+                        pair="EURUSD", side="BUY", units=1000,
+                        stop_loss=str(entry - Decimal("0.005")))
+                    opened_state = postgres_state.load(conn)
+                    with patch.object(lifecycle.postgres_accounting, "post",
+                                      side_effect=RuntimeError("INJECTED_JOURNAL_FAILURE")):
+                        with self.assertRaisesRegex(RuntimeError, "INJECTED_JOURNAL_FAILURE"):
+                            lifecycle.close_position(
+                                conn, position_id=position_id,
+                                expected_revision=opened["state_revision"])
+                    self.assertEqual(postgres_state.load(conn), opened_state,
+                                     "Failed settlement modified persisted state")
+                    with conn.cursor() as cur:
+                        cur.execute("select count(*) from playgo_private.trade_events where event_id=%s",
+                                    ("CLOSED:" + position_id,))
+                        self.assertEqual(cur.fetchone()[0], 0)
+                        cur.execute("select count(*) from playgo_private.accounting_journals where transaction_id=%s",
+                                    ("TRADE:" + position_id,))
+                        self.assertEqual(cur.fetchone()[0], 0)
+                    self.assertEqual(postgres_accounting.reconcile(conn), before_accounting)
+                    raise _Rollback()
+            except _Rollback:
+                pass
+            self.assertEqual(postgres_state.load(conn), before)
+            self.assertEqual(postgres_accounting.reconcile(conn), before_accounting)
+            with conn.cursor() as cur:
+                cur.execute("select count(*) from playgo_private.trade_events where event_id=%s",
+                            ("CLOSED:" + position_id,))
                 self.assertEqual(cur.fetchone()[0], 0)
 
 

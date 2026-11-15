@@ -184,6 +184,36 @@ def submit_demo_order(payload: DemoOrderRequest, authorization: str = Header(def
         raise HTTPException(status, str(exc)) from exc
 
 
+
+
+@app.get("/api/demo/orders")
+def demo_order_history(limit: int = 25, offset: int = 0, pair: str | None = None,
+                       side: str | None = None, status: str | None = None,
+                       date_from: str | None = None, date_to: str | None = None,
+                       authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            return postgres_demo_orders.list_orders(
+                conn, limit=limit, offset=offset, pair=pair, side=side,
+                status=status, date_from=date_from, date_to=date_to)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/demo/orders/{client_order_id}")
+def demo_order_detail(client_order_id: str,
+                      authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            order = postgres_demo_orders.get_order(conn, client_order_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if order is None:
+        raise HTTPException(404, "DEMO order not found")
+    return order
+
 @app.get("/api/demo/orders/pending")
 def pending_demo_orders(limit: int = 50, authorization: str = Header(default="")):
     owner(authorization)

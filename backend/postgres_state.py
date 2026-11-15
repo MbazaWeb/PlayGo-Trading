@@ -67,6 +67,11 @@ def commit(conn, previous, proposed):
         raise ValueError("Missing expected revision")
     if proposed.get("feed_type") != "SYNTHETIC":
         raise ValueError("Only synthetic paper quotes are supported")
+    if previous.get("automation_emergency_stop") is True:
+        if proposed.get("automation_emergency_stop") is not True:
+            raise ValueError("Emergency stop cannot be cleared")
+        if proposed.get("paused") is not True:
+            raise ValueError("Emergency-stopped PAPER engine must remain paused")
     if proposed.get("starting_balance") != previous.get("starting_balance"):
         raise ValueError("Starting paper balance is immutable")
     if not isinstance(proposed.get("trades"), list):
@@ -88,6 +93,8 @@ def set_paused(conn, *, expected_revision: int, paused: bool):
     previous = load(conn)
     if previous["revision"] != expected_revision:
         raise postgres_ledger.StaleStateError("Paper state changed; reload before retrying")
+    if not paused and previous.get("automation_emergency_stop") is True:
+        raise ValueError("Emergency stop is engaged; unpausing is forbidden")
     if previous["paused"] == paused:
         return previous
     proposed = deepcopy(previous)

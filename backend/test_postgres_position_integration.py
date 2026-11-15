@@ -16,6 +16,7 @@ from unittest.mock import patch
 from dotenv import load_dotenv
 from psycopg.conninfo import conninfo_to_dict
 import psycopg
+from psycopg.errors import LockNotAvailable
 
 import postgres_accounting
 import postgres_position_lifecycle as lifecycle
@@ -191,6 +192,45 @@ class RealPostgresPositionTests(unittest.TestCase):
                 cur.execute("select count(*) from playgo_private.trade_events where event_id=%s",
                             ("CLOSED:" + position_id,))
                 self.assertEqual(cur.fetchone()[0], 0)
+
+    def test_concurrent_state_row_lock_exclusion(self):
+        """Two connections cannot simultaneously acquire the PAPER state write lock.
+
+        Read-only contention test: no position or accounting rows are changed.
+        This checks PostgreSQL's row-lock primitive, not a full concurrent
+        open/close settlement race.
+        """
+        dsn = os.getenv("DATABASE_URL", "")
+        self.assertTrue(dsn, "DATABASE_URL is required")
+        config = conninfo_to_dict(dsn)
+        self.assertEqual(config.get("user"), TEST_USER)
+        self.assertEqual(config.get("host"), TEST_HOST)
+        self.assertEqual(str(config.get("port", "5432")), "5432")
+        self.assertEqual(config.get("dbname"), "postgres")
+        sql = ("select revision from playgo_private.documents "
+               "where collection_name='app_state' and document_id='paper-trading-state' "
+               "for update")
+        with psycopg.connect(dsn, connect_timeout=8) as first:
+            with psycopg.connect(dsn, connect_timeout=8) as second:
+                before = postgres_state.load(first)
+                before_accounting = postgres_accounting.reconcile(first)
+                # Finish implicit read transactions before locking the row.
+                first.rollback()
+                second.rollback()
+                with first.transaction():
+                    with first.cursor() as cur:
+                        cur.execute(sql)
+                        self.assertEqual(cur.fetchone()[0], before["revision"])
+                    with self.assertRaises(LockNotAvailable):
+                        with second.transaction():
+                            with second.cursor() as cur:
+                                cur.execute("set local lock_timeout = '1000ms'")
+                                cur.execute(sql)
+                    # The blocked writer must not modify any state.
+                    self.assertEqual(postgres_state.load(first), before)
+                self.assertEqual(postgres_state.load(second), before)
+                self.assertEqual(postgres_accounting.reconcile(second),
+                                 before_accounting)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ import postgres_accounting
 import postgres_demo_orders
 import postgres_analytics
 import postgres_positions
+import postgres_position_lifecycle
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -260,6 +261,48 @@ def preview_paper_position(payload: PaperPositionPreview,
         raise HTTPException(400, str(exc)) from exc
     return {"mode": "PAPER", "execution": "PREVIEW_ONLY",
             "state_revision": state["revision"], "assessment": assessment}
+
+
+class PaperPositionOpen(BaseModel):
+    position_id: str
+    expected_revision: int
+    pair: str
+    side: str
+    units: int
+    stop_loss: str
+
+
+class PaperPositionClose(BaseModel):
+    expected_revision: int
+
+
+@app.post("/api/paper/positions")
+def open_paper_position(payload: PaperPositionOpen,
+                        authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            return postgres_position_lifecycle.open_position(conn, **payload.model_dump())
+    except postgres_ledger.StaleStateError as exc:
+        raise HTTPException(409, "State revision changed; reload and retry") from exc
+    except postgres_position_lifecycle.PositionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (postgres_positions.RiskRejected, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/paper/positions/{position_id}/close")
+def close_paper_position(position_id: str, payload: PaperPositionClose,
+                         authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            return postgres_position_lifecycle.close_position(
+                conn, position_id=position_id, expected_revision=payload.expected_revision)
+    except postgres_ledger.StaleStateError as exc:
+        raise HTTPException(409, "State revision changed; reload and retry") from exc
+    except (postgres_positions.RiskRejected, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/analytics/overview")

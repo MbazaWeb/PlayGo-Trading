@@ -94,6 +94,8 @@ def set_paused(conn, *, expected_revision: int, paused: bool):
     proposed["paused"] = paused
     # Unpausing must never override an existing risk lock.
     if not paused:
+        if proposed.get("automation_emergency_stop", False) is not False:
+            raise ValueError("Emergency stop is engaged; unpausing is forbidden")
         today = datetime.now(timezone.utc).date().isoformat()
         if proposed.get("day_start_date") != today:
             raise ValueError("New UTC session requires a risk reset before starting")

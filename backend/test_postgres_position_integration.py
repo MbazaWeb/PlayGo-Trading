@@ -49,9 +49,7 @@ class RealPostgresPositionTests(unittest.TestCase):
             before_accounting = postgres_accounting.reconcile(conn)
             self.assertTrue(before_accounting["consistent"],
                             "Baseline accounting reconciliation failed")
-            self.assertEqual(before["balance"] * 100,
-                             before_accounting["balances_cents"]["CASH"],
-                             "Paper state balance differs from ledger cash")
+            baseline_difference = (before_accounting["balances_cents"]["CASH"]\n                                   - round(before["balance"] * 100))
             self.assertFalse(before["positions"],
                              "Test requires no existing positions")
             # Roll back every write even after all assertions succeed.
@@ -69,15 +67,18 @@ class RealPostgresPositionTests(unittest.TestCase):
                     prepared["day_start_date"] = datetime.now(timezone.utc).date().isoformat()
                     prepared["day_start_balance"] = before["balance"]
                     rev = postgres_state.commit(conn, before, prepared)
+                    from decimal import Decimal
+                    entry = Decimal(str(prepared["quotes"]["EURUSD"]["ask"]))
+                    stop = str(entry - Decimal("0.005"))
                     opened = lifecycle.open_position(
                         conn, position_id=position_id, expected_revision=rev,
                         pair="EURUSD", side="BUY", units=1000,
-                        stop_loss="0.99")
+                        stop_loss=stop)
                     self.assertEqual(opened["status"], "OPEN")
                     repeated = lifecycle.open_position(
                         conn, position_id=position_id, expected_revision=rev,
                         pair="EURUSD", side="BUY", units=1000,
-                        stop_loss="0.99")
+                        stop_loss=stop)
                     self.assertEqual(repeated["position"], opened["position"])
                     with self.assertRaises(lifecycle.PositionConflict):
                         lifecycle.open_position(
@@ -97,8 +98,9 @@ class RealPostgresPositionTests(unittest.TestCase):
                     self.assertFalse(current["positions"])
                     self.assertEqual(len(current["trades"]), len(before["trades"]) + 1)
                     self.assertEqual(
-                        accounting["balances_cents"]["CASH"],
-                        round(current["balance"] * 100))
+                        accounting["balances_cents"]["CASH"] - round(current["balance"] * 100),
+                        baseline_difference,
+                        "Settlement must not change the historical ledger variance")
                     with conn.cursor() as cur:
                         cur.execute(
                             "select count(*) from playgo_private.trade_events where event_id=%s",

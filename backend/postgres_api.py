@@ -80,7 +80,10 @@ def health():
 @app.post("/api/identity/bootstrap-owner")
 def bootstrap_owner(payload: Credentials, request: Request,
                     x_playgo_bootstrap_secret: str = Header(default="")):
-    # Bootstrap is intentionally unavailable from deployed public networks.
+    # Proxies can make public requests appear to originate from loopback.
+    # Require an explicit local deployment mode in addition to the secret.
+    if os.getenv("PLAYGO_ENV", "").lower() != "local":
+        raise HTTPException(403, "Owner bootstrap disabled outside local development")
     if request.client is None or request.client.host not in ("127.0.0.1", "::1"):
         raise HTTPException(403, "Bootstrap requires local access")
     secret = os.getenv("PLAYGO_OWNER_BOOTSTRAP_SECRET", "")

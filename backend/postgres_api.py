@@ -17,6 +17,8 @@ import psycopg
 import postgres_identity
 import postgres_ledger
 import postgres_accounting
+import postgres_demo_orders
+from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -143,3 +145,42 @@ def journals(limit: int = 50, authorization: str = Header(default="")):
     with connect() as conn:
         return {"mode": "PAPER", "currency": "USD",
                 "journals": postgres_accounting.recent_journals(conn, limit)}
+
+
+class DemoOrderRequest(BaseModel):
+    client_order_id: str
+    pair: str
+    side: str
+    units: int
+    bid: str
+    ask: str
+    slippage_pips: str = "0.2"
+
+
+@app.post("/api/demo/orders")
+def submit_demo_order(payload: DemoOrderRequest, authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            return postgres_demo_orders.submit_demo_order(conn, **payload.model_dump())
+    except (DemoOrderError, ValueError) as exc:
+        status = 409 if isinstance(exc, postgres_demo_orders.OrderConflict) else 400
+        raise HTTPException(status, str(exc)) from exc
+
+
+@app.get("/api/demo/orders/pending")
+def pending_demo_orders(limit: int = 50, authorization: str = Header(default="")):
+    owner(authorization)
+    if not 1 <= limit <= 200:
+        raise HTTPException(400, "Invalid limit")
+    with connect() as conn:
+        return {"mode": "DEMO", "orders": postgres_demo_orders.pending_orders(conn, limit)}
+
+
+@app.post("/api/demo/orders/recover")
+def recover_demo_orders(limit: int = 50, authorization: str = Header(default="")):
+    owner(authorization)
+    if not 1 <= limit <= 200:
+        raise HTTPException(400, "Invalid limit")
+    with connect() as conn:
+        return postgres_demo_orders.recover_pending(conn, limit)

@@ -52,10 +52,12 @@ class StrategyTests(unittest.TestCase):
         main.state.clear()
         main.state.update(main.new_state())
         with patch.object(main, "tick", return_value=main.snapshot()) as tick, \
-             patch.object(main, "order") as order:
+             patch.object(main, "order") as order, \
+             patch.object(main, "persist_state") as persist:
             result = agents.tick_cycle(main)
             tick.assert_called_once()
             order.assert_not_called()
+            persist.assert_called_once()
             self.assertTrue(result["paused"])
 
 

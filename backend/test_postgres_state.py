@@ -72,5 +72,23 @@ class StateTests(unittest.TestCase):
         mocked_commit.assert_not_called()
 
 
+    @patch("postgres_state.load")
+    def test_unpause_rejects_daily_drawdown(self, mocked_load):
+        from datetime import datetime, timezone
+        mocked_load.return_value = dict(
+            self.previous, paused=True, balance=9700.0,
+            day_start_balance=10000.0,
+            day_start_date=datetime.now(timezone.utc).date().isoformat())
+        with self.assertRaisesRegex(ValueError, "drawdown"):
+            postgres_state.set_paused(None, expected_revision=0, paused=False)
+
+    @patch("postgres_state.load")
+    def test_unpause_rejects_stale_utc_session(self, mocked_load):
+        mocked_load.return_value = dict(
+            self.previous, paused=True, day_start_date="2000-01-01")
+        with self.assertRaisesRegex(ValueError, "UTC session"):
+            postgres_state.set_paused(None, expected_revision=0, paused=False)
+
+
 if __name__ == "__main__":
     unittest.main()

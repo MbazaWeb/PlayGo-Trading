@@ -30,11 +30,11 @@ function App(){
  const [historyPage,setHistoryPage]=useState(0),[historyPair,setHistoryPair]=useState(''),[historySide,setHistorySide]=useState(''),[historyStatus,setHistoryStatus]=useState(''),[dateFrom,setDateFrom]=useState(''),[dateTo,setDateTo]=useState('');
  const [selectedOrder,setSelectedOrder]=useState<Order|null>(null);
  const [analytics,setAnalytics]=useState<Analytics|null>(null),[analyticsBusy,setAnalyticsBusy]=useState(false),[analyticsError,setAnalyticsError]=useState('');
- const [reconciliation,setReconciliation]=useState<Reconciliation|null>(null);
+ const [reconciliation,setReconciliation]=useState<Reconciliation|null>(null),[reconciliationBusy,setReconciliationBusy]=useState(false),[reconciliationError,setReconciliationError]=useState("");
  const [positionPair,setPositionPair]=useState("EURUSD"),[positionSide,setPositionSide]=useState<"BUY"|"SELL">("BUY"),[positionUnits,setPositionUnits]=useState(1000),[stopLoss,setStopLoss]=useState("");
  const [positionError,setPositionError]=useState(""),[positionMessage,setPositionMessage]=useState("");
  const pageSize=20;
- const logoutLocal=useCallback(()=>{sessionStorage.removeItem(KEY);setToken('');setState(null);setAccount(null);setOrders([]);setHistory(null);setSelectedOrder(null);setAnalytics(null);setReconciliation(null);setPassword('')},[]);
+ const logoutLocal=useCallback(()=>{sessionStorage.removeItem(KEY);setToken('');setState(null);setAccount(null);setOrders([]);setHistory(null);setSelectedOrder(null);setAnalytics(null);setReconciliation(null);setReconciliationError('');setPassword('')},[]);
  const refresh=useCallback(async(t=token)=>{
   if(!t||!API)return;
   try{
@@ -43,7 +43,7 @@ function App(){
   }catch(e){if((e as Error).message==='SESSION_EXPIRED')logoutLocal();else setError((e as Error).message)}
  },[token,logoutLocal]);
  useEffect(()=>{if(!token)return;void refresh();const timer=setInterval(()=>void refresh(),15000);return()=>clearInterval(timer)},[token,refresh]);
- const loadReconciliation=useCallback(async()=>{if(!token)return;try{setReconciliation(await request('/api/accounting/reconciliation',token))}catch(e){setPositionError((e as Error).message)}},[token]);
+ const loadReconciliation=useCallback(async()=>{if(!token)return;setReconciliationBusy(true);setReconciliationError('');try{setReconciliation(await request('/api/accounting/reconciliation',token))}catch(e){setReconciliation(null);setReconciliationError((e as Error).message)}finally{setReconciliationBusy(false)}},[token]);
  useEffect(()=>{if(tab==='positions'&&token)void loadReconciliation()},[tab,token,loadReconciliation]);
  async function openPosition(e:React.FormEvent){e.preventDefault();if(!state)return;setBusy(true);setPositionError('');setPositionMessage('');try{
   const result=await request('/api/paper/positions',token,'POST',{position_id:'paper-'+crypto.randomUUID(),expected_revision:state.revision,pair:positionPair,side:positionSide,units:positionUnits,stop_loss:stopLoss});
@@ -100,8 +100,10 @@ function App(){
  {!state?<section className="panel">Loading positions…</section>:<>
  <div className="simpleStats"><article><small>Open positions</small><strong>{state.positions.length}</strong></article><article><small>Closed trades</small><strong>{state.trades.length}</strong></article><article><small>Unrealized P&amp;L (indicative)</small><strong>{money(state.positions.reduce((total,p)=>total+(paperPnl(p)??0),0))}</strong></article><article><small>Paper cash</small><strong>{money(state.balance)}</strong></article></div>
  <section className="panel"><div className="panelTitle"><h3>Accounting integrity</h3><span className="pill">{accountingAligned?'ALIGNED':'NOT VERIFIED'}</span></div>
- <p>Journal consistency: {reconciliation===null?'Checking…':reconciliation.consistent?'PASS':'FAIL'}. Cash comparison: {reconciliation===null?'Pending':money((reconciliation.balances_cents.CASH??0)/100)+' ledger / '+money(state.balance)+' state'}.</p>
- {!accountingAligned&&<p className="error" role="alert">Position opening is disabled until the PAPER cash and accounting ledger agree. Existing positions remain visible; closing is also disabled until reconciliation is resolved.</p>}
+ <p>Journal consistency: {reconciliationError?'ERROR':reconciliationBusy?'Checking…':reconciliation===null?'Not loaded':reconciliation.consistent?'PASS':'FAIL'}. Cash comparison: {reconciliation===null?'Unavailable':money((reconciliation.balances_cents.CASH??0)/100)+' ledger / '+money(state.balance)+' state'}.</p>
+ {reconciliationError&&<p className="error" role="alert">Reconciliation request failed: {reconciliationError}. Check the backend server and retry.</p>}
+ {reconciliation&&reconciliation.issues.length>0&&<p className="error" role="alert">Ledger issues: {reconciliation.issues.join(', ')}</p>}
+ {!accountingAligned&&<p className="error" role="alert">PAPER cash and ledger must agree before opening positions. A discrepancy does not justify deleting journals or silently adjusting balances. Existing positions remain visible.</p>}
  </section>
  <section className="panel"><div className="panelTitle"><h3>Open a PAPER position</h3><span className="pill">SYNTHETIC ONLY</span></div>
  <p>Opening uses the current synthetic ask for BUY or bid for SELL. The backend enforces exposure, stop-loss and drawdown limits.</p>
@@ -113,7 +115,7 @@ function App(){
  {state.paused&&<small>The PAPER engine is paused. Enable it from Dashboard after resolving accounting integrity.</small>}
  </section>
  <section className="panel"><div className="panelTitle"><h3>Active positions</h3><span>{state.positions.length} open</span></div>
- {!state.positions.length?<p className="empty">No open PAPER positions.</p>:state.positions.map(p=><div className="positionRecord" key={p.id}><div><b>{p.pair} · {p.side}</b><small>{p.units} units · Opened {showDate(p.opened_at)}</small><small>Entry {p.entry_price} · Stop {p.stop_loss}</small><small>Unrealized P&amp;L: {paperPnl(p)===null?'Quote unavailable':money(paperPnl(p)!)}</small></div><button className="secondary" disabled={busy||!accountingAligned} onClick={()=>void closePosition(p.id)}>Close PAPER</button></div>)}
+ {!state.positions.length?<p className="empty">No open PAPER positions.</p>:state.positions.map(p=><div className="positionRecord" key={p.id}><div><b>{p.pair} · {p.side}</b><small>{p.units} units · Opened {showDate(p.opened_at)}</small><small>Entry {p.entry_price} · Stop {p.stop_loss}</small><small>Unrealized P&amp;L: {paperPnl(p)===null?'Quote unavailable':money(paperPnl(p)!)}</small></div><button className="secondary" disabled={busy} onClick={()=>void closePosition(p.id)}>Close PAPER</button></div>)}
  </section>
  <section className="panel"><div className="panelTitle"><h3>Closed PAPER trades</h3><span>{state.trades.length} settled records</span></div>
  {!state.trades.length?<p className="empty">No closed PAPER trades.</p>:state.trades.slice().reverse().map(p=><div className="positionRecord" key={p.id}><div><b>{p.pair} · {p.side}</b><small>{p.units} units · {showDate(p.closed_at||'')}</small><small>Entry {p.entry_price} · Exit {p.exit_price}</small></div><strong>{p.pnl===undefined?'N/A':money(Number(p.pnl))}</strong></div>)}

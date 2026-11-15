@@ -562,7 +562,14 @@ def order(request: Order) -> dict[str, Any]:
             raise HTTPException(400, "A fresh OANDA practice quote is required")
     pip = quote["pip"]
     entry = quote["ask" if side == "BUY" else "bid"]
-    available_notional = max(0.0, equity() - sum(p["units"] * p["entry"] for p in state["positions"]))
+    # A new position immediately loses its bid/ask spread at mark-to-market.
+    # Reserve that cost before sizing so aggregate exposure stays <= equity
+    # after the new position is opened, not merely before execution.
+    current_equity = equity()
+    committed_notional = sum(p["units"] * p["entry"] for p in state["positions"])
+    available_notional = max(0.0, current_equity - committed_notional)
+    spread_cost_per_unit = max(0.0, quote["ask"] - quote["bid"])
+    available_notional = max(0.0, available_notional)
     risk_budget = min(
         equity() * 0.005,
         max(
@@ -572,7 +579,7 @@ def order(request: Order) -> dict[str, Any]:
         ),
     )
     effective_stop = request.stop_pips * pip + quote["spread"]
-    units = min(int(risk_budget / effective_stop), int(available_notional / entry))
+    units = min(int(risk_budget / effective_stop), int(available_notional / (entry + spread_cost_per_unit)))
     if units < 1:
         raise HTTPException(400, "Insufficient risk budget")
     stop_price = entry + (-1 if side == "BUY" else 1) * request.stop_pips * pip
@@ -583,7 +590,7 @@ def order(request: Order) -> dict[str, Any]:
             400,
             "USDJPY disabled until quote-currency conversion is implemented",
         )
-    if units * entry > available_notional:
+    if units * (entry + spread_cost_per_unit) > available_notional + 1e-8:
         raise HTTPException(400, "Aggregate unleveraged notional exceeds equity")
 
     previous_state = deepcopy(state)

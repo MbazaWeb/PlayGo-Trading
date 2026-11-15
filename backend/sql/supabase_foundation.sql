@@ -36,3 +36,9 @@ create table if not exists playgo_private.accounting_journals (
   created_at timestamptz not null default now()
 );
 -- No anon/authenticated grants. Application must use a server-side PostgreSQL connection.
+
+-- Defense in depth: even if the schema is later exposed, no public access policies exist.
+alter table playgo_private.documents enable row level security;
+alter table playgo_private.owner_sessions enable row level security;
+alter table playgo_private.trade_events enable row level security;
+alter table playgo_private.accounting_journals enable row level security;

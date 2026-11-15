@@ -1,105 +1,56 @@
-import React,{useEffect,useState} from 'react';import{createRoot}from'react-dom/client';import{Activity,ShieldCheck,Power,RefreshCw,TrendingUp,History,Settings2,X,LayoutDashboard,Download}from'lucide-react';import './style.css';
-const configuredApi=(import.meta.env.VITE_API_URL||'').trim().replace(/\/$/,'');
-const API=configuredApi||(location.hostname==='localhost'||location.hostname==='127.0.0.1'?'http://127.0.0.1:8000':'');
-const API_READY=Boolean(API);
-const TOKEN_KEY='playgo_owner_session';
-function readToken(){return sessionStorage.getItem(TOKEN_KEY)||''}
-async function apiFetch(path:string,token:string,init:RequestInit={}){
- const headers=new Headers(init.headers);
- if(token)headers.set('Authorization','Bearer '+token);
- if(init.body)headers.set('Content-Type','application/json');
- return fetch(API+path,{...init,headers,cache:'no-store'});
-}
-async function parseResponse(r:Response){
+import React, {useCallback,useEffect,useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import './style.css';
+
+const API=(import.meta.env.VITE_API_URL||'').trim().replace(/\/$/,'') ||
+  (['localhost','127.0.0.1'].includes(location.hostname)?'http://127.0.0.1:8001':'');
+const KEY='playgo_owner_session';
+type Quote={bid:number;ask:number;pip:number;spread:number};
+type PaperState={revision:number;balance:number;starting_balance:number;paused:boolean;feed_type:string;ticks:number;last_cycle_at:string|null;quotes:Record<string,Quote>;positions:unknown[];trades:unknown[];logs:{id:string;time:string;agent:string;message:string}[];risk_lock_reason:string|null;loss_streak:number};
+type Order={client_order_id:string;status:string;request:{pair:string;side:string;units:number};fill:unknown;created_at:string};
+async function request(path:string,token='',method='GET',body?:unknown){
+ const r=await fetch(API+path,{method,cache:'no-store',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body)});
  const data=await r.json().catch(()=>({}));
- if(!r.ok)throw Error(r.status===401?'Owner session expired or invalid. Please sign in again.':data.detail||'Request failed');
+ if(!r.ok)throw new Error(r.status===401?'SESSION_EXPIRED':typeof data.detail==='string'?data.detail:'HTTP '+r.status);
  return data;
 }
-type ClosedTrade={id:string;pair:string;side:string;opened_at?:string;closed_at?:string;entry:number;exit:number;units:number;pnl:number;reason:string};
-type TradeReport={total:number;limit:number;offset:number;trades:ClosedTrade[]};
-type Analytics={equity_history:Array<{time:string;equity:number}>;max_observed_drawdown_pct:number;drawdown_sample_count:number;pair_performance:Array<{pair:string;closed_trades:number;wins:number;losses:number;win_rate_pct:number;realized_pnl:number}>};
-type Decision={id:string;time:string;agent:string;category:string;message:string};
-type Performance={closed_trades:number;wins:number;losses:number;win_rate_pct:number;realized_pnl:number;unrealized_pnl:number;net_pnl:number};
-function PriceChart({values}:{values:number[]}){if(values.length<2)return <p className="empty">Collect at least two agent cycles to plot a price line.</p>;const lo=Math.min(...values),hi=Math.max(...values),range=hi-lo||0.0001;const points=values.map((v,i)=>`${(i/(values.length-1)*100).toFixed(2)},${(100-(v-lo)/range*100).toFixed(2)}`).join(' ');return <div className="chartWrap"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Historical sampled midpoint prices"><polyline points={points} fill="none" stroke="#72a2ff" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/></svg><div className="chartLabels"><small>Low {lo.toFixed(5)}</small><small>{values.length} sampled points · not OHLC candles</small><small>High {hi.toFixed(5)}</small></div></div>}
-type Position={id:string;pair:string;side:string;entry:number;stop:number;target:number;units:number};type Log={id:string;time:string;agent:string;message:string};type State={analytics?:Analytics;risk?:{session_date_utc:string;day_start_equity:number;loss_streak:number;max_loss_streak:number;drawdown_limit_pct:number;locked:boolean;reason:string|null};last_cycle_at?:string|null;automation?:{minimum_cycle_seconds?:number;configured_feed?:string};decision_timeline?:Decision[];performance?:Performance;price_history?:Record<string,number[]>;balance:number;equity:number;paused:boolean;feed:string;quotes:Record<string,{bid:number;ask:number}>;positions:Position[];trades:Array<{id:string;pair:string;pnl:number}>;logs:Log[];signals?:Array<{pair:string;side:string;source:string;created_at:string}>;strategy_diagnostics?:Array<{pair:string;signal:string;ema_fast:number|null;ema_slow:number|null;spread_pips:number;observations:number;required_observations:number;reason:string}>};
-type View='overview'|'markets'|'history'|'settings';
 function App(){
- const [token,setToken]=useState(readToken),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[authBusy,setAuthBusy]=useState(false),[authError,setAuthError]=useState(''),[s,setS]=useState<State|null>(null),[error,setError]=useState(''),[view,setView]=useState<View>('overview'),[busy,setBusy]=useState(false),[pair,setPair]=useState('EURUSD'),[side,setSide]=useState('BUY'),[orderOpen,setOrderOpen]=useState(false),[confirm,setConfirm]=useState<'start'|'stop'|null>(null),[report,setReport]=useState<TradeReport|null>(null),[filter,setFilter]=useState('ALL'),[page,setPage]=useState(0);
- function signOut(message=''){
-  sessionStorage.removeItem(TOKEN_KEY);setToken('');setS(null);setReport(null);setError('');
-  setAuthError(message);setPassword('');
- }
- async function signIn(e:React.FormEvent){
-  e.preventDefault();if(!API_READY){setAuthError('Backend not configured. Set VITE_API_URL to your FastAPI backend.');return}
-  setAuthBusy(true);setAuthError('');
+ const [token,setToken]=useState(()=>sessionStorage.getItem(KEY)||'');
+ const [username,setUsername]=useState('playgo_admin'),[password,setPassword]=useState('');
+ const [state,setState]=useState<PaperState|null>(null),[account,setAccount]=useState<{role:string;mode:string}|null>(null);
+ const [orders,setOrders]=useState<Order[]>([]),[pair,setPair]=useState('EURUSD'),[side,setSide]=useState('BUY'),[units,setUnits]=useState(1000);
+ const [busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
+ const logoutLocal=useCallback(()=>{sessionStorage.removeItem(KEY);setToken('');setState(null);setAccount(null);setOrders([]);setPassword('')},[]);
+ const refresh=useCallback(async(t=token)=>{
+  if(!t||!API)return;
   try{
-   const data=await parseResponse(await apiFetch('/api/identity/login','',{method:'POST',body:JSON.stringify({username,password})}));
-   if(!data.access_token)throw Error('Login did not return a session');
-   sessionStorage.setItem(TOKEN_KEY,data.access_token);setToken(data.access_token);setPassword('');
-  }catch(e){setAuthError(e instanceof Error?e.message:String(e))}
-  finally{setAuthBusy(false)}
+   const [a,s]=await Promise.all([request('/api/identity/me/paper-account',t),request('/api/state',t)]);
+   setAccount(a);setState(s.state);setError('');
+  }catch(e){if((e as Error).message==='SESSION_EXPIRED')logoutLocal();else setError((e as Error).message)}
+ },[token,logoutLocal]);
+ useEffect(()=>{if(!token)return;void refresh();const timer=setInterval(()=>void refresh(),15000);return()=>clearInterval(timer)},[token,refresh]);
+ async function login(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');
+  try{const d=await request('/api/identity/login','','POST',{username,password});if(typeof d.access_token!=='string')throw Error('Missing session token');sessionStorage.setItem(KEY,d.access_token);setToken(d.access_token);setPassword('')}
+  catch(e){setError((e as Error).message)}finally{setBusy(false)}
  }
- async function request(path:string,body?:unknown){
-  if(!API_READY||!token){setError('Backend or owner session unavailable.');return}
-  setBusy(true);
-  try{
-   const data=await parseResponse(await apiFetch(path,token,{method:path==='/api/status'?'GET':'POST',body:body?JSON.stringify(body):undefined}));
-   setS(data);setError('');
-  }catch(e){
-   if(e instanceof Error&&e.message.includes('Owner session expired'))signOut(e.message);
-   else setError(e instanceof TypeError?'Cannot reach the trading backend. Check VITE_API_URL, HTTPS and CORS.':e instanceof Error?e.message:String(e));
-  }finally{setBusy(false)}
+ async function logout(){setBusy(true);try{await request('/api/identity/logout',token,'POST')}catch(e){setError('Server logout not confirmed: '+(e as Error).message)}finally{logoutLocal();setBusy(false)}}
+ async function changeState(paused:boolean){if(!state)return;setBusy(true);setError('');try{const d=await request('/api/state/control',token,'POST',{expected_revision:state.revision,paused});setState(d.state);setMessage('Paper engine '+(paused?'paused':'enabled'))}catch(e){setError((e as Error).message);await refresh()}finally{setBusy(false)}}
+ async function cycle(){if(!state)return;setBusy(true);setError('');try{const d=await request('/api/auto-cycle',token,'POST',{expected_revision:state.revision});setState(d.state);setMessage('Synthetic observation completed — no order executed')}catch(e){setError((e as Error).message);await refresh()}finally{setBusy(false)}}
+ async function order(e:React.FormEvent){e.preventDefault();if(!state)return;const q=state.quotes[pair];if(!q){setError('Quote unavailable');return}
+  setBusy(true);setError('');try{const id='web-'+crypto.randomUUID();const d=await request('/api/demo/orders',token,'POST',{client_order_id:id,pair,side,units,bid:String(q.bid),ask:String(q.ask),slippage_pips:'0.2'});setOrders(v=>[d,...v]);setMessage('DEMO order '+d.status+' — not a live broker trade')}catch(e){setError((e as Error).message)}finally{setBusy(false)}
  }
- async function downloadCsv(){
-  if(!API_READY||!token)return;
-  try{
-   const response=await apiFetch('/api/reports/trades.csv?pair='+encodeURIComponent(filter),token);
-   if(response.status===401){signOut('Owner session expired. Please sign in again.');return}
-   if(!response.ok)throw Error('Unable to download trade report');
-   const blob=await response.blob();const url=URL.createObjectURL(blob);
-   const anchor=document.createElement('a');anchor.href=url;anchor.download='playgo-paper-trades.csv';anchor.click();
-   setTimeout(()=>URL.revokeObjectURL(url),1000);
-  }catch(e){setError(e instanceof Error?e.message:String(e))}
- }
- useEffect(()=>{
-  if(!token||!API_READY)return;
-  let active=true;
-  const refresh=async()=>{
-   try{
-    const response=await apiFetch('/api/status',token);
-    if(response.status===401){if(active)signOut('Session expired. Please sign in again.');return}
-    const data=await parseResponse(response);if(active)setS(data);
-   }catch(e){if(active)setError(e instanceof Error?e.message:String(e))}
-  };
-  refresh();const timer=setInterval(refresh,7000);
-  return()=>{active=false;clearInterval(timer)}
- },[token]);
- useEffect(()=>{
-  if(view!=='history'||!API_READY||!token)return;
-  let active=true;
-  apiFetch('/api/reports/trades?'+new URLSearchParams({pair:filter,limit:'20',offset:String(page*20)}),token)
-   .then(parseResponse).then(d=>{if(active){setReport(d);setError('')}})
-   .catch(e=>{if(active){if(e instanceof Error&&e.message.includes('Owner session expired'))signOut(e.message);else setError(String(e))}});
-  return()=>{active=false}
- },[view,filter,page,s?.trades.length,token]);
- const money=(n:number|undefined)=>'$'+(n??0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
- const tabs:[View,string,React.ReactNode][]=[['overview','Overview',<LayoutDashboard size={18}/>],['markets','Markets',<Activity size={18}/>],['history','History',<History size={18}/>],['settings','Controls',<Settings2 size={18}/>]];
- if(!token)return <main className="simpleApp"><header className="simpleHeader"><div className="brand"><div className="logo">P</div><div><h1>PlayGo <span>AI Trading</span></h1><small>COMPANY OWNER ACCESS · PAPER ONLY</small></div></div></header><section className="panel" style={{maxWidth:440,margin:'72px auto',padding:28}}><h2>Owner sign in</h2><p>Private trading dashboard for PlayGo Tanzania Limited.</p><form onSubmit={signIn} style={{display:'grid',gap:14,marginTop:20}}><label>Username<input autoComplete="username" required value={username} onChange={e=>setUsername(e.target.value)} style={{display:'block',width:'100%',padding:12,marginTop:6}}/></label><label>Password<input type="password" autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)} style={{display:'block',width:'100%',padding:12,marginTop:6}}/></label>{authError&&<div className="error" role="alert">{authError}</div>}<button className="primary" type="submit" disabled={authBusy||!API_READY}>{authBusy?'Signing in…':'Sign in'}</button></form>{!API_READY&&<p className="error">Backend URL missing. Configure VITE_API_URL.</p>}<small>Owner account must first be initialized securely on the backend. Public registration is disabled.</small></section></main>;
- return <main className="simpleApp">
- <header className="simpleHeader"><div className="brand"><div className="logo">P</div><div><h1>PlayGo <span>AI Trading</span></h1><small>PAPER TRADING DASHBOARD</small></div></div><div className="headerRight"><span className="pill">PAPER ONLY</span><button className="secondary" onClick={()=>signOut()}>Sign out</button><span className="pill amber">{s?.paused?'PAUSED':'ACTIVE'}</span></div></header>
- <nav className="simpleTabs" aria-label="Dashboard navigation">{tabs.map(([id,label,icon])=><button key={id} type="button" aria-current={view===id?'page':undefined} className={view===id?'selected':''} onClick={()=>setView(id)}>{icon}<span>{label}</span></button>)}</nav>
- {error&&<div className="error" role="alert">{error}</div>}
- {view==='overview'&&<div className="viewContent"><div className="viewHeading"><div><h2>Overview</h2><p>Your paper account at a glance</p></div><button className="secondary" disabled={busy||!API_READY} onClick={()=>request('/api/status')}><RefreshCw size={16}/> Refresh</button></div>
- <div className="simpleStats"><article><small>Equity</small><strong>{money(s?.equity)}</strong></article><article><small>Balance</small><strong>{money(s?.balance)}</strong></article><article><small>Open positions</small><strong>{s?.positions.length??0}</strong></article><article><small>Net P&amp;L</small><strong>{money(s?.performance?.net_pnl)}</strong></article></div>
- <section className="panel"><div className="panelTitle"><h3><ShieldCheck size={18}/> Trading status</h3><span className="pill">{s?.risk?.locked?'RISK LOCKED':s?.paused?'PAUSED':'RUNNING'}</span></div><p>{s?.risk?.locked?'Entries are suspended: '+(s.risk.reason??'risk limit reached').replace(/_/g,' '):s?.paused?'The paper engine is paused.':'The paper engine is enabled. All orders remain virtual.'}</p><div className="simpleActions"><button className="primary" disabled={busy||!API_READY} onClick={()=>setConfirm(s?.paused?'start':'stop')}><Power size={16}/>{s?.paused?'Start engine':'Pause entries'}</button><button className="secondary" disabled={busy} onClick={()=>request('/api/auto-cycle')}><RefreshCw size={16}/> Run cycle</button></div></section>
- <section className="panel"><div className="panelTitle"><h3><TrendingUp size={18}/> Open positions</h3><span>{s?.positions.length??0} active</span></div>{!s?.positions.length?<p className="empty">No open positions.</p>:s.positions.map(p=><div className="simpleItem" key={p.id}><div><b>{p.pair} · {p.side}</b><small>Entry {p.entry} · Stop {p.stop} · Target {p.target}</small></div><button className="secondary" disabled={busy} onClick={()=>request('/api/positions/'+p.id+'/close')}>Close</button></div>)}</section>
- </div>}
- {view==='markets'&&<div className="viewContent"><div className="viewHeading"><div><h2>Markets</h2><p>Quotes and strategy signals</p></div><button className="primary" disabled={!API_READY} onClick={()=>setOrderOpen(true)}>New paper order</button></div><section className="panel"><div className="panelTitle"><h3>Live feed</h3><span>{s?.feed??'Unavailable'}</span></div><div className="simpleTableHead"><span>Pair</span><span>Bid</span><span>Ask</span></div>{Object.entries(s?.quotes??{}).map(([name,q])=><div className="simpleTableRow" key={name}><b>{name.slice(0,3)}/{name.slice(3)}</b><span>{q.bid}</span><span>{q.ask}</span></div>)}</section><section className="panel"><div className="panelTitle"><h3>Strategy signals</h3><span>EMA 9/21</span></div>{!s?.strategy_diagnostics?.length?<p className="empty">Waiting for observations.</p>:s.strategy_diagnostics.map(d=><div className="simpleItem" key={d.pair}><div><b>{d.pair} · {d.signal}</b><small>{d.observations}/{d.required_observations} observations · {d.reason.replace(/_/g,' ')}</small></div><span>{d.spread_pips} pips</span></div>)}</section></div>}
- {view==='history'&&<div className="viewContent"><div className="viewHeading"><div><h2>Trade history</h2><p>Closed paper orders and results</p></div><button className="reportDownload" disabled={!API_READY||!token} onClick={downloadCsv}><Download size={16}/> CSV</button></div><section className="panel"><div className="simpleFilter"><label htmlFor="pairFilter">Currency pair</label><select id="pairFilter" value={filter} onChange={e=>{setFilter(e.target.value);setPage(0)}}><option value="ALL">All pairs</option><option value="EURUSD">EUR/USD</option><option value="GBPUSD">GBP/USD</option></select></div>{!report?.trades.length?<p className="empty">No matching closed trades.</p>:report.trades.map(t=><div className="simpleItem" key={t.id}><div><b>{t.pair} · {t.side}</b><small>{t.closed_at?new Date(t.closed_at).toLocaleDateString():'Legacy record'} · {t.reason}</small></div><strong>{money(t.pnl)}</strong></div>)}<div className="reportPagination"><small>{report?.total??0} trades</small><div><button className="secondary" disabled={page===0} onClick={()=>setPage(v=>v-1)}>Previous</button><button className="secondary" disabled={!report||((page+1)*20>=report.total)} onClick={()=>setPage(v=>v+1)}>Next</button></div></div></section></div>}
- {view==='settings'&&<div className="viewContent"><div className="viewHeading"><div><h2>Controls &amp; diagnostics</h2><p>Secondary information, organized on demand</p></div></div><section className="panel"><div className="panelTitle"><h3>Risk supervisor</h3></div><div className="simpleStats twoStats"><article><small>Consecutive losses</small><strong>{s?.risk?.loss_streak??0} / {s?.risk?.max_loss_streak??3}</strong></article><article><small>Daily drawdown limit</small><strong>{s?.risk?.drawdown_limit_pct??2}%</strong></article></div><small>Session: {s?.risk?.session_date_utc??'—'} · Last cycle: {s?.last_cycle_at?new Date(s.last_cycle_at).toLocaleString():'Not yet run'}</small></section><details className="simpleDisclosure"><summary>Performance analytics</summary><div className="panel"><div className="simpleStats twoStats"><article><small>Closed trades</small><strong>{s?.performance?.closed_trades??0}</strong></article><article><small>Win rate</small><strong>{s?.performance?.win_rate_pct??0}%</strong></article><article><small>Observed drawdown</small><strong>{s?.analytics?.max_observed_drawdown_pct??0}%</strong></article><article><small>Realized P&amp;L</small><strong>{money(s?.performance?.realized_pnl)}</strong></article></div></div></details><details className="simpleDisclosure"><summary>Agent activity</summary><div className="panel">{!s?.logs.length?<p className="empty">No events yet.</p>:s.logs.slice(0,15).map(l=><div className="simpleItem" key={l.id}><div><b>{l.agent}</b><small>{l.message}</small></div><small>{new Date(l.time).toLocaleTimeString()}</small></div>)}</div></details><details className="simpleDisclosure"><summary>Agent network</summary><div className="panel"><p>Scanner → Strategy → Risk Checker → Executor → Logger → Supervisor</p><small>Six coordinated paper-trading modules. No live brokerage connection.</small></div></details></div>}
- <footer>PlayGo Tanzania · Paper trading only · No live brokerage connection</footer>
- {orderOpen&&<div className="modalBackdrop" onClick={()=>setOrderOpen(false)}><div className="actionModal" role="dialog" aria-modal="true" aria-labelledby="orderTitle" onClick={e=>e.stopPropagation()}><div className="panelTitle"><h3 id="orderTitle">New paper order</h3><button className="iconButton" aria-label="Close dialog" onClick={()=>setOrderOpen(false)}><X size={18}/></button></div><p>Virtual order · 20-pip stop · 40-pip target</p><div className="modalFields"><label>Pair<select value={pair} onChange={e=>setPair(e.target.value)}><option value="EURUSD">EUR/USD</option><option value="GBPUSD">GBP/USD</option></select></label><label>Direction<select value={side} onChange={e=>setSide(e.target.value)}><option>BUY</option><option>SELL</option></select></label></div><div className="modalActions"><button className="secondary" onClick={()=>setOrderOpen(false)}>Cancel</button><button className="primary" disabled={busy||!API_READY} onClick={()=>{setOrderOpen(false);request('/api/orders',{pair,side,stop_pips:20,take_profit_pips:40})}}>Submit paper order</button></div></div></div>}
- {confirm&&<div className="modalBackdrop" onClick={()=>setConfirm(null)}><div className="actionModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" onClick={e=>e.stopPropagation()}><div className="panelTitle"><h3 id="confirmTitle">{confirm==='start'?'Start paper engine?':'Pause entries?'}</h3><button className="iconButton" aria-label="Close dialog" onClick={()=>setConfirm(null)}><X size={18}/></button></div><p>{confirm==='start'?'Agents can submit virtual orders subject to risk limits.':'Open positions remain monitored.'}</p><div className="modalActions"><button className="secondary" onClick={()=>setConfirm(null)}>Cancel</button><button className="primary" disabled={busy} onClick={()=>{const action=confirm;setConfirm(null);request(action==='start'?'/api/start':'/api/stop')}}>Confirm</button></div></div></div>}
- </main>
+ const money=(v:number)=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+ if(!API)return <main className="simpleApp"><section className="panel"><h2>Backend URL not configured</h2><p>Set VITE_API_URL to the PostgreSQL FastAPI origin.</p></section></main>;
+ if(!token)return <main className="simpleApp"><header className="simpleHeader"><div className="brand"><div className="logo">P</div><h1>PlayGo AI Trading</h1></div><span className="pill">PAPER ONLY</span></header><section className="panel" style={{maxWidth:460,margin:'70px auto',padding:28}}><h2>Owner sign in</h2><p>Supabase PostgreSQL · Private owner access</p><form onSubmit={login} style={{display:'grid',gap:16,marginTop:20}}><label>Username<input required autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)}/></label><label>Password<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button className="primary" disabled={busy}>{busy?'Signing in…':'Sign in'}</button></form>{error&&<p className="error" role="alert">{error}</p>}<small>No public registration. Demo trading only.</small></section></main>;
+ return <main className="simpleApp"><header className="simpleHeader"><div className="brand"><div className="logo">P</div><div><h1>PlayGo AI Trading</h1><small>POSTGRESQL PAPER ACCOUNT</small></div></div><div className="headerRight"><span className="pill">PAPER ONLY</span><button className="secondary" disabled={busy} onClick={logout}>Sign out</button></div></header>
+ <div className="viewContent"><div className="viewHeading"><div><h2>Owner dashboard</h2><p>{account?.role||'OWNER'} · {account?.mode||'PAPER'} · Supabase-backed</p></div><button className="secondary" onClick={()=>void refresh()} disabled={busy}>Refresh</button></div>
+ {error&&<div className="error" role="alert">{error}</div>}{message&&<p role="status">{message}</p>}
+ {!state?<section className="panel"><p>Loading authoritative paper state…</p></section>:<>
+ <div className="simpleStats"><article><small>Paper balance</small><strong>{money(state.balance)}</strong></article><article><small>Initial balance</small><strong>{money(state.starting_balance)}</strong></article><article><small>Revision</small><strong>{state.revision}</strong></article><article><small>Observations</small><strong>{state.ticks}</strong></article></div>
+ <section className="panel"><div className="panelTitle"><h3>Paper engine</h3><span className="pill">{state.paused?'PAUSED':'ENABLED'}</span></div><p>Feed: {state.feed_type}. Enabling the engine does not place trades. Cycles observe synthetic prices only.</p>{state.risk_lock_reason&&<p className="error">Risk lock: {state.risk_lock_reason}</p>}<div className="simpleActions"><button className="primary" disabled={busy} onClick={()=>changeState(!state.paused)}>{state.paused?'Enable paper engine':'Pause paper engine'}</button><button className="secondary" disabled={busy} onClick={cycle}>Run synthetic cycle</button></div><small>Last cycle: {state.last_cycle_at||'Never'}</small></section>
+ <section className="panel"><div className="panelTitle"><h3>Synthetic market quotes</h3><span>{Object.keys(state.quotes).length} pairs</span></div><div className="simpleTableHead"><span>Pair</span><span>Bid</span><span>Ask</span></div>{Object.entries(state.quotes).map(([name,q])=><div className="simpleTableRow" key={name}><b>{name}</b><span>{q.bid}</span><span>{q.ask}</span></div>)}</section>
+ <section className="panel"><div className="panelTitle"><h3>Submit simulated DEMO order</h3><span className="pill">NO LIVE TRADING</span></div><p>Uses the currently displayed synthetic quote. Fills are deterministic and persisted separately from paper account positions.</p><form onSubmit={order} className="modalFields"><label>Pair<select value={pair} onChange={e=>setPair(e.target.value)}>{Object.keys(state.quotes).map(x=><option key={x}>{x}</option>)}</select></label><label>Direction<select value={side} onChange={e=>setSide(e.target.value)}><option>BUY</option><option>SELL</option></select></label><label>Units<input type="number" min="1" max="100000" required value={units} onChange={e=>setUnits(Number(e.target.value))}/></label><button className="primary" disabled={busy||!Number.isSafeInteger(units)||units<1||units>100000}>Submit DEMO order</button></form>{orders.map(o=><div className="simpleItem" key={o.client_order_id}><b>{o.request.pair} · {o.request.side} · {o.request.units} units</b><span>{o.status}</span></div>)}</section>
+ <section className="panel"><div className="panelTitle"><h3>Recent state events</h3></div>{state.logs.length===0?<p className="empty">No events yet</p>:state.logs.slice(0,15).map(l=><div className="simpleItem" key={l.id}><div><b>{l.agent}</b><small>{l.message}</small></div><small>{l.time}</small></div>)}</section>
+ </>}</div><footer>PlayGo Tanzania · Paper only · No live brokerage connection</footer></main>
 }
 createRoot(document.getElementById('root')!).render(<App/>);

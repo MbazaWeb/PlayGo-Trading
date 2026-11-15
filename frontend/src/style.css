@@ -129,3 +129,8 @@ body{min-width:320px;line-height:1.5;-webkit-font-smoothing:antialiased}
 .analyticsUnavailable{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}
 .analyticsUnavailable span{padding:13px;border:1px dashed rgba(170,199,242,.24);border-radius:11px;background:rgba(20,32,54,.55);font-size:13px;color:#b5c4db}
 @media(max-width:540px){.analyticsColumns,.analyticsUnavailable{grid-template-columns:1fr}.historyNav button{padding:9px 5px;font-size:12px}}
+
+/* Phase 6D PAPER position lifecycle */
+.positionRecord{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 8px;border-top:1px solid rgba(157,187,235,.16)}
+.positionRecord>div{min-width:0}.positionRecord b{font-size:14px}.positionRecord small{display:block;color:#a6b9d5;margin-top:5px;overflow-wrap:anywhere}.positionRecord strong{font-variant-numeric:tabular-nums}.positionRecord button{flex-shrink:0}
+@media(max-width:540px){.historyNav{flex-wrap:wrap}.historyNav button{flex:1 1 42%;min-width:0}.positionRecord{align-items:flex-start;flex-direction:column}.positionRecord button{width:100%}}

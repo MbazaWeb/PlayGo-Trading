@@ -232,6 +232,95 @@ class RealPostgresPositionTests(unittest.TestCase):
                 self.assertEqual(postgres_accounting.reconcile(second),
                                  before_accounting)
 
+    def test_concurrent_open_request_cannot_bypass_state_lock(self):
+        """An open request from a second connection times out while state is locked."""
+        dsn = os.getenv("DATABASE_URL", "")
+        self.assertTrue(dsn)
+        config = conninfo_to_dict(dsn)
+        self.assertEqual(config.get("user"), TEST_USER)
+        self.assertEqual(config.get("host"), TEST_HOST)
+        self.assertEqual(str(config.get("port", "5432")), "5432")
+        self.assertEqual(config.get("dbname"), "postgres")
+        with psycopg.connect(dsn, connect_timeout=8) as first:
+            with psycopg.connect(dsn, connect_timeout=8) as second:
+                before = postgres_state.load(first)
+                baseline = postgres_accounting.reconcile(first)
+                self.assertTrue(baseline["consistent"])
+                self.assertEqual(baseline["balances_cents"]["CASH"],
+                                 round(before["balance"] * 100))
+                first.rollback()
+                second.rollback()
+                from decimal import Decimal
+                entry = Decimal(str(before["quotes"]["EURUSD"]["ask"]))
+                stop = str(entry - Decimal("0.005"))
+                with first.transaction():
+                    with first.cursor() as cur:
+                        cur.execute(
+                            "select revision from playgo_private.documents "
+                            "where collection_name='app_state' "
+                            "and document_id='paper-trading-state' for update")
+                        self.assertEqual(cur.fetchone()[0], before["revision"])
+                    with self.assertRaises(LockNotAvailable):
+                        with second.transaction():
+                            with second.cursor() as cur:
+                                cur.execute("set local lock_timeout = '1000ms'")
+                            lifecycle.open_position(
+                                second, position_id="race_" + uuid4().hex,
+                                expected_revision=before["revision"],
+                                pair="EURUSD", side="BUY", units=1000,
+                                stop_loss=stop)
+                self.assertEqual(postgres_state.load(second), before)
+                self.assertEqual(postgres_accounting.reconcile(second), baseline)
+
+    def test_open_rejects_cash_discrepancy_before_mutation(self):
+        """Reject opening if the accounting journal and PAPER cash diverge."""
+        dsn = os.getenv("DATABASE_URL", "")
+        self.assertTrue(dsn)
+        config = conninfo_to_dict(dsn)
+        self.assertEqual(config.get("user"), TEST_USER)
+        self.assertEqual(config.get("host"), TEST_HOST)
+        self.assertEqual(str(config.get("port", "5432")), "5432")
+        self.assertEqual(config.get("dbname"), "postgres")
+        with psycopg.connect(dsn, connect_timeout=8) as conn:
+            before = postgres_state.load(conn)
+            baseline = postgres_accounting.reconcile(conn)
+            self.assertTrue(baseline["consistent"])
+            self.assertEqual(baseline["balances_cents"]["CASH"],
+                             round(before["balance"] * 100))
+            from copy import deepcopy
+            from datetime import datetime, timezone
+            from decimal import Decimal
+            try:
+                with conn.transaction():
+                    prepared = deepcopy(before)
+                    prepared["paused"] = False
+                    prepared["risk_lock_reason"] = None
+                    prepared["loss_streak"] = 0
+                    prepared["day_start_date"] = datetime.now(timezone.utc).date().isoformat()
+                    prepared["day_start_balance"] = before["balance"]
+                    revision = postgres_state.commit(conn, before, prepared)
+                    altered = dict(baseline)
+                    altered["balances_cents"] = dict(baseline["balances_cents"])
+                    altered["balances_cents"]["CASH"] += 100
+                    entry = Decimal(str(prepared["quotes"]["EURUSD"]["ask"]))
+                    with patch.object(lifecycle.postgres_accounting, "reconcile",
+                                      return_value=altered):
+                        with self.assertRaisesRegex(
+                            lifecycle.pricing.RiskRejected,
+                            "accounting reconciliation failed"
+                        ):
+                            lifecycle.open_position(
+                                conn, position_id="mis_" + uuid4().hex,
+                                expected_revision=revision,
+                                pair="EURUSD", side="BUY", units=1000,
+                                stop_loss=str(entry - Decimal("0.005")))
+                    self.assertEqual(postgres_state.load(conn)["revision"], revision)
+                    raise _Rollback()
+            except _Rollback:
+                pass
+            self.assertEqual(postgres_state.load(conn), before)
+            self.assertEqual(postgres_accounting.reconcile(conn), baseline)
+
 
 if __name__ == "__main__":
     unittest.main()

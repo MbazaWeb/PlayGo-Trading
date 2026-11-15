@@ -96,6 +96,14 @@ class RealPostgresPositionTests(unittest.TestCase):
                     repeated_close = lifecycle.close_position(
                         conn, position_id=position_id, expected_revision=rev)
                     self.assertEqual(repeated_close["position"], closed["position"])
+                    self.assertEqual(repeated_close["state_revision"], closed["state_revision"])
+                    # A retry with an obsolete revision must not post a
+                    # second settlement or advance state revision.
+                    retry_with_stale_revision = lifecycle.close_position(
+                        conn, position_id=position_id, expected_revision=0)
+                    self.assertEqual(retry_with_stale_revision, closed)
+                    self.assertEqual(postgres_state.load(conn)["revision"],
+                                     closed["state_revision"])
                     accounting = postgres_accounting.reconcile(conn)
                     self.assertTrue(accounting["consistent"], accounting["issues"])
                     current = postgres_state.load(conn)

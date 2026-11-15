@@ -49,6 +49,9 @@ async def lifespan(app: FastAPI):
                 raise RuntimeError("Supabase state schema has not been applied")
         postgres_accounting.initialize(conn)
         postgres_state.initialize(conn)
+        postgres_accounting.post(conn, transaction_id="OPENING:PAPER:USD:10000",
+                                 kind="CAPITAL_IN", amount_cents=1_000_000,
+                                 reference="SYNTHETIC_ACCOUNT_INITIALIZATION")
     yield
 
 

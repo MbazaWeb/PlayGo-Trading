@@ -53,6 +53,14 @@ class RiskEngineTests(unittest.TestCase):
         exposure = sum(p["units"] * p["entry"] for p in main.state["positions"])
         self.assertLessEqual(exposure, main.equity())
 
+    def test_spread_cost_reserved_before_position_approval(self):
+        main.start()
+        before = main.equity()
+        main.order(main.Order(pair="EURUSD", side="BUY"))
+        position = main.state["positions"][0]
+        self.assertLess(main.equity(), before)
+        self.assertLessEqual(position["units"] * position["entry"], main.equity())
+
     def test_duplicate_pair_is_rejected(self):
         main.start()
         main.order(main.Order(pair="EURUSD", side="BUY"))

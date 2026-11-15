@@ -49,7 +49,8 @@ class RealPostgresPositionTests(unittest.TestCase):
             before_accounting = postgres_accounting.reconcile(conn)
             self.assertTrue(before_accounting["consistent"],
                             "Baseline accounting reconciliation failed")
-            baseline_difference = (before_accounting["balances_cents"]["CASH"]\n                                   - round(before["balance"] * 100))
+            baseline_difference = (before_accounting["balances_cents"]["CASH"]
+                                   - round(before["balance"] * 100))
             self.assertFalse(before["positions"],
                              "Test requires no existing positions")
             # Roll back every write even after all assertions succeed.

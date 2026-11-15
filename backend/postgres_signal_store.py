@@ -78,6 +78,7 @@ def record_signal(conn, *, signal):
                 raise RuntimeError("PAPER state not initialized")
             state = postgres_state.load(conn)
             decision = validator.validate_signal(signal, state)
+            decision["signal_id"] = signal_id
             # Screening does not authorize execution; record only.
             decision["recorded_at"] = datetime.now(timezone.utc).isoformat()
             stored["status"] = "ACCEPTED" if decision["accepted"] else "REJECTED"

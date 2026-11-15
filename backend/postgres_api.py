@@ -25,6 +25,7 @@ import postgres_analytics
 import postgres_positions
 import postgres_position_lifecycle
 import postgres_signal_store
+import postgres_emergency_stop
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -410,3 +411,24 @@ def paper_signal_detail(signal_id: str,
     if decision is None:
         raise HTTPException(404, "PAPER signal not found")
     return decision
+
+
+class PaperEmergencyStopRequest(BaseModel):
+    expected_revision: int
+    reason: str
+
+
+@app.post("/api/paper/automation/emergency-stop")
+def paper_automation_emergency_stop(payload: PaperEmergencyStopRequest,
+                                    authorization: str = Header(default="")):
+    """Owner-only, one-way emergency stop; no automated execution."""
+    owner(authorization)
+    try:
+        with connect() as conn:
+            state = postgres_emergency_stop.engage(conn, **payload.model_dump())
+        return {"mode": "PAPER", "execution": "DISABLED",
+                "emergency_stop": True, "state": state}
+    except postgres_ledger.StaleStateError as exc:
+        raise HTTPException(409, "State revision changed; reload and retry") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc

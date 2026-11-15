@@ -27,6 +27,7 @@ import postgres_position_lifecycle
 import postgres_signal_store
 import postgres_emergency_stop
 import postgres_automated_risk
+import postgres_risk_audit
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -463,3 +464,50 @@ def paper_automation_risk_preview(payload: PaperAutomatedRiskPreview,
                 automation_enabled=False)
     return {"mode": "PAPER", "execution": "OBSERVATION_ONLY",
             "state_revision": state["revision"], "decision": decision}
+
+
+class PaperRiskAuditRequest(BaseModel):
+    assessment_id: str
+    proposal: PaperAutomatedRiskPreview
+
+
+@app.post("/api/paper/automation/risk-assessments")
+def record_paper_risk_assessment(payload: PaperRiskAuditRequest,
+                                 authorization: str = Header(default="")):
+    """Explicitly persist a risk decision; no account state mutation."""
+    owner(authorization)
+    try:
+        with connect() as conn:
+            return postgres_risk_audit.record(
+                conn, assessment_id=payload.assessment_id,
+                proposal=payload.proposal.model_dump())
+    except postgres_risk_audit.AuditConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/paper/automation/risk-assessments")
+def paper_risk_assessment_history(limit: int = 25, offset: int = 0,
+                                  authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            return postgres_risk_audit.list_recent(
+                conn, limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/paper/automation/risk-assessments/{assessment_id}")
+def paper_risk_assessment_detail(assessment_id: str,
+                                 authorization: str = Header(default="")):
+    owner(authorization)
+    try:
+        with connect() as conn:
+            result = postgres_risk_audit.get(conn, assessment_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if result is None:
+        raise HTTPException(404, "Risk assessment not found")
+    return result

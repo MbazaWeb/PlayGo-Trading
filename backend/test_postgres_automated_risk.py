@@ -56,7 +56,13 @@ class AutomatedRiskTests(unittest.TestCase):
         self.assertIn("DAILY_DRAWDOWN", self.assess()["reasons"])
 
     def test_proposed_exposure_rejects(self):
-        self.proposal["units"] = 5000
+        # 4,000 units alone fit the $5,000 manual position cap; together
+        # with an existing 1,000-unit position they exceed the stricter
+        # $5,000 automated total exposure cap.
+        self.state["positions"] = [{"pair": "EURUSD", "side": "BUY",
+                                    "units": 1000, "entry_price": "1.085",
+                                    "stop_loss": "1.080"}]
+        self.proposal["units"] = 4000
         self.assertIn("AUTOMATION_EXPOSURE_LIMIT", self.assess()["reasons"])
 
     def test_invalid_proposal_rejects(self):

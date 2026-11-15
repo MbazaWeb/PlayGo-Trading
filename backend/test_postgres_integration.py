@@ -6,6 +6,7 @@ not explicitly configured. The test database is discarded after each job.
 import os
 import unittest
 from uuid import uuid4
+from urllib.parse import urlsplit
 
 import psycopg
 
@@ -21,8 +22,18 @@ class PostgresIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         dsn = os.environ["TEST_DATABASE_URL"]
-        if "localhost" not in dsn and "127.0.0.1" not in dsn:
-            raise RuntimeError("Integration tests must use local disposable PostgreSQL")
+        parsed = urlsplit(dsn)
+        host = (parsed.hostname or "").lower()
+        local = host in ("localhost", "127.0.0.1", "::1")
+        if not local:
+            # Only the dedicated PlayGo Trading Test project is permitted.
+            # Reject pooler hostnames and every other Supabase project.
+            expected = "db.bkxapdsnpucrqptupzbz.supabase.co"
+            if host != expected or os.getenv("PLAYGO_TEST_PROJECT_REF") != "bkxapdsnpucrqptupzbz":
+                raise RuntimeError(
+                    "Remote integration tests require the dedicated PlayGo Trading Test "
+                    "direct DB host and PLAYGO_TEST_PROJECT_REF=bkxapdsnpucrqptupzbz"
+                )
         cls.conn = psycopg.connect(dsn)
         postgres_accounting.initialize(cls.conn)
         postgres_state.initialize(cls.conn)

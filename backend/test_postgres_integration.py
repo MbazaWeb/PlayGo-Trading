@@ -22,16 +22,30 @@ class PostgresIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         dsn = os.environ["TEST_DATABASE_URL"]
-        host = conninfo_to_dict(dsn).get("host", "").lower()
+        params = conninfo_to_dict(dsn)
+        host = params.get("host", "").lower()
+        user = params.get("user", "")
+        port = str(params.get("port", "5432"))
         local = host in ("localhost", "127.0.0.1", "::1")
         if not local:
-            # Only the dedicated PlayGo Trading Test project is permitted.
-            # Reject pooler hostnames and every other Supabase project.
-            expected = "db.bkxapdsnpucrqptupzbz.supabase.co"
-            if host != expected or os.getenv("PLAYGO_TEST_PROJECT_REF") != "bkxapdsnpucrqptupzbz":
+            project_ref = "bkxapdsnpucrqptupzbz"
+            direct = host == "db." + project_ref + ".supabase.co" and user == "postgres"
+            # Supavisor session pooler hostnames vary by region. The
+            # project-specific username prevents targeting another project.
+            pooler = (
+                host.endswith(".pooler.supabase.com")
+                and host.count(".") == 3
+                and user == "postgres." + project_ref
+                and port == "5432"
+            )
+            if (
+                os.getenv("PLAYGO_TEST_PROJECT_REF") != project_ref
+                or not (direct or pooler)
+            ):
                 raise RuntimeError(
-                    "Remote integration tests require the dedicated PlayGo Trading Test "
-                    "direct DB host and PLAYGO_TEST_PROJECT_REF=bkxapdsnpucrqptupzbz"
+                    "Remote tests require the dedicated PlayGo Trading Test "
+                    "direct host or session pooler with project-specific username, "
+                    "plus PLAYGO_TEST_PROJECT_REF=" + project_ref
                 )
         cls.conn = psycopg.connect(dsn)
         postgres_accounting.initialize(cls.conn)

@@ -48,8 +48,7 @@ def simulate_cycle(previous: dict, *, now: datetime | None = None) -> dict:
         updated["paused"] = True
         updated["day_start_date"] = now.date().isoformat()
         updated["day_start_balance"] = updated["balance"]
-        updated["loss_streak"] = 0
-        updated["risk_lock_reason"] = None
+        # Risk locks must not be silently cleared at UTC rollover.
     updated["signals"] = updated.get("signals", [])[-100:]
     for pair in PAIRS:
         agents.append_price(updated, pair)

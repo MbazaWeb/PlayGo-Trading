@@ -40,6 +40,16 @@ class SyntheticCycleTests(unittest.TestCase):
         updated = postgres_cycle.simulate_cycle(self.state, now=self.now)
         self.assertTrue(updated["paused"])
 
+    def test_utc_rollover_preserves_risk_lock(self):
+        self.state["paused"] = False
+        self.state["day_start_date"] = "2026-11-14"
+        self.state["risk_lock_reason"] = "DAILY_DRAWDOWN"
+        self.state["loss_streak"] = 3
+        updated = postgres_cycle.simulate_cycle(self.state, now=self.now)
+        self.assertTrue(updated["paused"])
+        self.assertEqual(updated["risk_lock_reason"], "DAILY_DRAWDOWN")
+        self.assertEqual(updated["loss_streak"], 3)
+
     @patch("postgres_cycle.postgres_state.commit", return_value=1)
     @patch("postgres_cycle.postgres_state.load")
     def test_run_cycle_uses_cas(self, load, commit):

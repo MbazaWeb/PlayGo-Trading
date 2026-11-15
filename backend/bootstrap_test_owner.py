@@ -45,7 +45,11 @@ def call(path, data=None, secret=None):
         with urlopen(request, timeout=20) as response:
             return response.status, json.load(response)
     except HTTPError as exc:
-        return exc.code, json.load(exc)
+        raw = exc.read().decode('utf-8', errors='replace')
+        try:
+            return exc.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return exc.code, {'detail': 'Non-JSON HTTP error response'}
 
 
 def main():
@@ -77,7 +81,7 @@ def main():
         else:
             raise RuntimeError("API startup timeout")
         if status != 200:
-            raise RuntimeError(f"API health failed: HTTP {status}")
+            raise RuntimeError(f"API health failed: HTTP {status}; check database reachability")
         status, result = call("/api/identity/bootstrap-owner",
                               {"username": username, "password": password},
                               secret=secret)

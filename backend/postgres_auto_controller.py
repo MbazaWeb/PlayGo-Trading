@@ -15,6 +15,8 @@ MAX_AUTOMATED_EXPOSURE_USD = Decimal("5000")
 def evaluate(state, accounting, *, automation_enabled=False, now=None):
     """Return an auditable decision; never mutate inputs or execute trades."""
     reasons = []
+    if state.get("automation_emergency_stop", False) is not False:
+        reasons.append("EMERGENCY_STOP")
     if automation_enabled is not True:
         reasons.append("AUTOMATION_DISABLED")
     if state.get("feed_type") != "SYNTHETIC":
@@ -53,7 +55,7 @@ def evaluate(state, accounting, *, automation_enabled=False, now=None):
         reasons.append("INVALID_STATE")
     return {
         "mode": "PAPER",
-        "phase": "7A",
+        "phase": "7D",
         "execution": "OBSERVATION_ONLY",
         "automation_enabled": automation_enabled is True,
         "eligible": not reasons,

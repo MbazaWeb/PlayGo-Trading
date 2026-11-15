@@ -17,9 +17,17 @@ class RiskEngineTests(unittest.TestCase):
         main.state.clear()
         main.state.update(main.new_state())
         main.state_collection = MemoryCollection()
+        main.ledger_collection = MemoryCollection()
+        self.ledger_patch = patch.object(
+            main.ledger, "commit_state",
+            side_effect=lambda _state, _events, previous, current: previous["revision"] + 1,
+        )
+        self.ledger_patch.start()
 
     def tearDown(self):
+        self.ledger_patch.stop()
         main.state_collection = None
+        main.ledger_collection = None
 
     def test_paused_engine_rejects_orders(self):
         with self.assertRaises(HTTPException) as error:

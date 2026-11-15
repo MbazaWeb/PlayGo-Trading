@@ -34,3 +34,71 @@ section[id],details[id]{scroll-margin-top:115px}
 .simpleApp{max-width:1050px;margin:0 auto;min-height:100dvh;padding-bottom:24px}.simpleHeader{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 0;border-bottom:1px solid rgba(155,185,230,.15);background:none;backdrop-filter:none}.simpleHeader .brand h1{font-size:20px}.simpleHeader .brand small{font-size:10px}.simpleHeader .headerRight{display:flex;gap:6px;flex-wrap:wrap}.simpleTabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:8px;background:rgba(26,41,67,.76);border:1px solid rgba(160,190,240,.14);border-radius:15px;margin:20px 0 26px}.simpleTabs button{border:0;background:transparent;color:#a9bad5;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:9px;min-height:44px;padding:10px;font-size:13px;font-weight:700;cursor:pointer}.simpleTabs button.selected{background:#315a9b;color:white;box-shadow:0 3px 15px rgba(0,0,0,.16)}.simpleTabs button:hover{background:rgba(86,136,218,.25)}.simpleTabs button.selected:hover{background:#315a9b}.viewContent{display:grid;gap:16px;align-content:start;min-height:55vh}.viewHeading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px}.viewHeading h2{margin:0 0 5px;font-size:clamp(22px,4vw,29px)}.viewHeading p{margin:0;color:#9eb1d0;font-size:13px}.simpleStats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.simpleStats article{background:rgba(28,45,73,.72);border:1px solid rgba(160,190,240,.14);border-radius:14px;padding:18px;min-width:0}.simpleStats article small{display:block;color:#a4b6d1;font-size:12px;margin-bottom:9px}.simpleStats article strong{font-size:clamp(17px,2.5vw,24px);font-weight:750;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.simpleActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.simpleApp .panel{padding:20px;margin:0}.simpleApp .panel p{line-height:1.6;color:#b5c5dd}.simpleItem{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:15px 0;border-top:1px solid rgba(145,174,217,.14);font-size:13px}.simpleItem:first-of-type{border-top:0}.simpleItem>div{min-width:0}.simpleItem small{display:block;margin-top:6px;color:#96abc9;overflow-wrap:anywhere}.simpleTableHead,.simpleTableRow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:center;padding:13px 0;font-size:13px;border-bottom:1px solid rgba(145,174,217,.14)}.simpleTableHead{font-size:11px;color:#9aafcb}.simpleTableHead span:not(:first-child),.simpleTableRow span{text-align:right;font-variant-numeric:tabular-nums}.simpleFilter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}.simpleFilter label{font-size:12px;color:#a9bada}.simpleFilter select{min-width:150px}.twoStats{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:16px}.simpleDisclosure{background:rgba(26,41,67,.6);border:1px solid rgba(160,190,240,.15);border-radius:14px;overflow:hidden}.simpleDisclosure summary{padding:18px 20px;cursor:pointer;font-weight:700;list-style-position:inside}.simpleDisclosure .panel{background:transparent;border:0;box-shadow:none;border-radius:0;padding-top:0}.simpleApp footer{margin-top:36px;text-align:center;color:#8297b8;font-size:11px}.simpleApp .error{margin:0 0 16px}.simpleApp button:disabled{opacity:.5}.simpleApp .reportDownload{gap:8px}
 @media(max-width:720px){.simpleApp{padding:0 14px 105px}.simpleHeader{padding:14px 0}.simpleHeader .brand h1{font-size:17px}.simpleHeader .brand small{font-size:9px}.simpleHeader .headerRight .pill{font-size:9px;padding:6px}.simpleTabs{position:fixed;z-index:45;bottom:0;left:0;right:0;margin:0;border-radius:16px 16px 0 0;padding:9px 10px max(10px,env(safe-area-inset-bottom));background:rgba(13,23,42,.97);backdrop-filter:blur(20px);box-shadow:0 -10px 35px rgba(0,0,0,.25)}.simpleTabs button{flex-direction:column;gap:5px;font-size:10px;padding:7px 2px;min-height:53px}.simpleTabs button svg{width:20px;height:20px}.viewContent{gap:12px}.simpleStats{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.simpleStats article{padding:14px}.simpleStats article strong{font-size:18px}.simpleApp .panel{padding:16px}.simpleItem{font-size:12px}.simpleActions button{flex:1;justify-content:center}.viewHeading h2{font-size:23px}.viewHeading .primary,.viewHeading .secondary{font-size:12px}.simpleApp footer{margin-top:25px}}
 @media(max-width:370px){.simpleHeader .headerRight .pill:first-child{display:none}.simpleStats article strong{font-size:16px}.simpleTableRow{font-size:12px}.simpleApp{padding-left:10px;padding-right:10px}}
+
+
+/* PlayGo dashboard v2 — consistent hierarchy, controls and responsive layout */
+:root{color-scheme:dark;--pg-border:rgba(157,187,235,.17);--pg-text:#eef4ff;--pg-muted:#a7b8d1;--pg-blue:#4485ff}
+html{scroll-behavior:smooth}
+body{min-width:320px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.simpleApp{max-width:1200px;padding-left:clamp(16px,3vw,36px);padding-right:clamp(16px,3vw,36px)}
+.simpleHeader{padding:22px 0;margin-bottom:28px}
+.simpleHeader .logo{display:grid;place-items:center;width:50px;height:50px;padding:0;border-radius:15px;box-shadow:0 10px 28px rgba(42,110,255,.22)}
+.simpleHeader .brand h1{font-size:clamp(18px,2.3vw,23px);letter-spacing:-.4px}
+.simpleHeader .brand small{display:block;margin-top:3px;letter-spacing:1.1px}
+.viewContent{gap:20px}
+.viewHeading{margin-bottom:0}
+.viewHeading h2{font-size:clamp(24px,3vw,34px);letter-spacing:-.8px}
+.viewHeading p{font-size:13px}
+.simpleStats{gap:14px}
+.simpleStats article{position:relative;overflow:hidden;min-height:118px;padding:21px 22px;background:linear-gradient(145deg,rgba(32,54,89,.93),rgba(22,36,61,.82));border:1px solid var(--pg-border);border-radius:18px}
+.simpleStats article:first-child{border-color:rgba(77,144,255,.48);box-shadow:inset 0 2px 0 rgba(85,150,255,.3)}
+.simpleStats article small{font-size:12px;letter-spacing:.1px;margin-bottom:12px}
+.simpleStats article strong{display:block;font-size:clamp(21px,2.5vw,30px);letter-spacing:-.6px;line-height:1.2}
+.simpleApp .panel{padding:clamp(18px,2.3vw,26px);border-radius:20px}
+.simpleApp .panelTitle{margin-bottom:16px}
+.simpleApp .panelTitle h3{font-size:17px;letter-spacing:-.2px}
+.simpleApp .panel p{font-size:14px;margin-top:0}
+.simpleApp .panel small{line-height:1.6}
+.simpleTableHead,.simpleTableRow{grid-template-columns:minmax(100px,1.3fr) repeat(2,minmax(90px,1fr));padding:15px 8px}
+.simpleTableRow{font-size:14px}
+.simpleTableRow:hover{background:rgba(100,148,225,.06)}
+.simpleTableRow b{font-weight:750}
+.simpleTableRow span{font-feature-settings:"tnum";letter-spacing:.15px}
+.simpleApp button{min-height:43px;padding:11px 16px;border-radius:11px}
+.simpleApp .primary{background:linear-gradient(135deg,#478bff,#2d6ef3);box-shadow:0 5px 16px rgba(40,100,220,.17)}
+.simpleApp .secondary{background:#23324c;border:1px solid rgba(169,197,243,.1)}
+.simpleApp button:focus-visible,.simpleApp input:focus-visible,.simpleApp select:focus-visible{outline:2px solid #91b9ff;outline-offset:3px}
+.simpleApp input,.simpleApp select{display:block;width:100%;min-width:0;min-height:45px;border:1px solid rgba(170,199,242,.24);border-radius:11px;background:#202f49;color:#f3f7ff;padding:10px 13px;font:inherit;font-size:14px}
+.simpleApp input::placeholder{color:#91a3bf}
+.simpleApp input[type=number]{appearance:textfield;-moz-appearance:textfield}
+.simpleApp input[type=number]::-webkit-inner-spin-button{opacity:.7}
+.simpleApp label{display:flex;flex-direction:column;gap:8px;color:#b7c9e4;font-size:12px;font-weight:600}
+.simpleApp .modalFields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:end;gap:16px;margin:20px 0 12px}
+.simpleApp .modalFields button{width:100%;min-height:45px}
+.simpleApp .simpleItem{padding:15px 8px}
+.simpleApp .simpleItem>span{font-weight:750;color:#77dfb2;font-size:12px}
+.simpleApp .error{border:1px solid rgba(255,130,156,.3);background:rgba(120,35,57,.5);padding:14px 16px}
+.simpleApp [role=status]{padding:12px 15px;border:1px solid rgba(91,191,148,.3);border-radius:12px;background:rgba(28,99,77,.24);color:#a2ebc9;font-size:13px}
+.simpleApp .pill{white-space:nowrap}
+.simpleApp footer{border-top:1px solid rgba(157,187,235,.1);margin-top:38px;padding:28px 0 16px}
+@media(max-width:760px){
+ .simpleApp{padding:0 16px 30px}
+ .simpleHeader{margin-bottom:22px;flex-wrap:wrap}
+ .simpleStats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .simpleStats article{min-height:105px;padding:16px}
+ .simpleStats article strong{font-size:clamp(18px,4.8vw,25px)}
+ .simpleApp .modalFields{gap:12px}
+ .simpleApp .panel{padding:18px}
+}
+@media(max-width:460px){
+ .simpleHeader .brand{gap:9px}
+ .simpleHeader .logo{width:42px;height:42px;font-size:21px}
+ .simpleHeader .brand h1{font-size:16px}
+ .simpleHeader .headerRight{width:100%;justify-content:space-between}
+ .viewHeading{align-items:flex-start}
+ .viewHeading h2{font-size:24px}
+ .simpleApp .modalFields{grid-template-columns:1fr}
+ .simpleApp .simpleActions{display:grid;grid-template-columns:1fr}
+ .simpleTableHead,.simpleTableRow{grid-template-columns:minmax(82px,1.2fr) repeat(2,minmax(68px,1fr));font-size:12px;padding:12px 2px}
+ .simpleApp .panelTitle h3{font-size:15px}
+}

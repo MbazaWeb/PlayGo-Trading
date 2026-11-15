@@ -70,8 +70,10 @@ jobs:
           import psycopg
           root = Path("backend/sql")
           with psycopg.connect(os.environ["TEST_DATABASE_URL"]) as conn:
+              conn.execute("create role anon nologin")
+              conn.execute("create role authenticated nologin")
               for name in ("supabase_foundation.sql", "supabase_owner_identity.sql", "supabase_accounting_integrity.sql"):
-                  conn.execute((root / name).read_text())
+                  conn.execute((root / name).read_text(), prepare=False)
           PY
       - name: Run real PostgreSQL integration tests
         working-directory: backend

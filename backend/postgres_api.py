@@ -22,6 +22,7 @@ import postgres_cycle
 import postgres_accounting
 import postgres_demo_orders
 import postgres_analytics
+import postgres_positions
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -232,6 +233,34 @@ def demo_order_detail(client_order_id: str,
     if order is None:
         raise HTTPException(404, "DEMO order not found")
     return order
+
+class PaperPositionPreview(BaseModel):
+    pair: str
+    side: str
+    units: int
+    stop_loss: str
+
+
+@app.post("/api/paper/positions/preview")
+def preview_paper_position(payload: PaperPositionPreview,
+                           authorization: str = Header(default="")):
+    """Risk-check a hypothetical position; no position is opened."""
+    owner(authorization)
+    with connect() as conn:
+        state = postgres_state.load(conn)
+    try:
+        quote = state["quotes"][payload.pair]
+        entry = quote["ask"] if payload.side == "BUY" else quote["bid"]
+        assessment = postgres_positions.validate_open(
+            state, pair=payload.pair, side=payload.side, units=payload.units,
+            entry_price=entry, stop_loss=payload.stop_loss)
+    except KeyError as exc:
+        raise HTTPException(400, "Unknown synthetic quote") from exc
+    except postgres_positions.RiskRejected as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"mode": "PAPER", "execution": "PREVIEW_ONLY",
+            "state_revision": state["revision"], "assessment": assessment}
+
 
 @app.get("/api/analytics/overview")
 def analytics_overview(authorization: str = Header(default="")):

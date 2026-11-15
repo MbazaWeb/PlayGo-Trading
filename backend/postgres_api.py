@@ -21,6 +21,7 @@ import postgres_state
 import postgres_cycle
 import postgres_accounting
 import postgres_demo_orders
+import postgres_analytics
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -231,6 +232,13 @@ def demo_order_detail(client_order_id: str,
     if order is None:
         raise HTTPException(404, "DEMO order not found")
     return order
+
+@app.get("/api/analytics/overview")
+def analytics_overview(authorization: str = Header(default="")):
+    owner(authorization)
+    with connect() as conn:
+        return postgres_analytics.snapshot(conn)
+
 
 @app.get("/api/state")
 def paper_state(authorization: str = Header(default="")):

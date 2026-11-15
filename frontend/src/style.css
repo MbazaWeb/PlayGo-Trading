@@ -121,3 +121,11 @@ body{min-width:320px;line-height:1.5;-webkit-font-smoothing:antialiased}
 .fillDetails{max-height:240px;overflow:auto;padding:14px;border:1px solid rgba(157,187,235,.17);border-radius:10px;background:#0b162a;color:#d8e7ff;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:850px){.historyFilters{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:550px){.historyFilters{grid-template-columns:repeat(2,minmax(0,1fr))}.historyNav{margin-bottom:16px}.historyTableRow{font-size:12px}}
+
+
+/* Phase 5: verified analytics */
+.analyticsColumns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.analyticsColumns h4{margin:0 0 8px;font-size:13px;color:#a9bdda}
+.analyticsUnavailable{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}
+.analyticsUnavailable span{padding:13px;border:1px dashed rgba(170,199,242,.24);border-radius:11px;background:rgba(20,32,54,.55);font-size:13px;color:#b5c4db}
+@media(max-width:540px){.analyticsColumns,.analyticsUnavailable{grid-template-columns:1fr}.historyNav button{padding:9px 5px;font-size:12px}}

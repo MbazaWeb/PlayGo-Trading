@@ -105,3 +105,73 @@ def recover_pending(conn, limit=50):
             errors.append({"client_order_id": row["client_order_id"],
                            "error": type(exc).__name__})
     return {"mode": "DEMO", "recovered": recovered, "errors": errors}
+
+
+def list_orders(conn, *, limit=25, offset=0, pair=None, side=None, status=None,
+                date_from=None, date_to=None):
+    """Paginated persisted DEMO orders; JSONB filters are parameterized.
+
+    Dates are UTC ISO calendar dates, inclusive. The same predicate is used for
+    the count and page query to avoid inconsistent pagination.
+    """
+    from datetime import date
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
+    if type(offset) is not int or not 0 <= offset <= 100000:
+        raise ValueError("offset must be between 0 and 100000")
+    if pair is not None and pair not in ("EURUSD", "GBPUSD"):
+        raise ValueError("Unsupported currency pair")
+    if side is not None and side not in ("BUY", "SELL"):
+        raise ValueError("Unsupported order direction")
+    if status is not None and status not in (PENDING, FILLED):
+        raise ValueError("Unsupported order status")
+    try:
+        start = date.fromisoformat(date_from) if date_from else None
+        end = date.fromisoformat(date_to) if date_to else None
+    except ValueError as exc:
+        raise ValueError("Dates must use YYYY-MM-DD") from exc
+    if start and end and start > end:
+        raise ValueError("date_from cannot exceed date_to")
+    conditions = ["collection_name=%s"]
+    params = [COLLECTION]
+    if pair:
+        conditions.append("body->'request'->>'pair'=%s")
+        params.append(pair)
+    if side:
+        conditions.append("body->'request'->>'side'=%s")
+        params.append(side)
+    if status:
+        conditions.append("body->>'status'=%s")
+        params.append(status)
+    if start:
+        conditions.append("(body->>'created_at')::timestamptz >= %s::date")
+        params.append(start.isoformat())
+    if end:
+        conditions.append("(body->>'created_at')::timestamptz < (%s::date + interval '1 day')")
+        params.append(end.isoformat())
+    where = " and ".join(conditions)
+    with conn.cursor() as cur:
+        cur.execute("select count(*) from playgo_private.documents where " + where,
+                    params)
+        total = cur.fetchone()[0]
+        cur.execute(
+            "select body from playgo_private.documents where " + where +
+            " order by (body->>'created_at')::timestamptz desc, document_id desc"
+            " limit %s offset %s",
+            [*params, limit, offset])
+        orders = [_public(_decode(row[0])) for row in cur.fetchall()]
+    return {"mode": "DEMO", "total": total, "limit": limit,
+            "offset": offset, "orders": orders}
+
+
+def get_order(conn, client_order_id):
+    """Return a single persisted DEMO order or None; never expose fingerprints."""
+    if not isinstance(client_order_id, str) or not client_order_id or len(client_order_id) > 200:
+        raise ValueError("Invalid client order ID")
+    with conn.cursor() as cur:
+        cur.execute(
+            "select body from playgo_private.documents"
+            " where collection_name=%s and document_id=%s",
+            (COLLECTION, client_order_id))
+        row = cur.fetchone()
+    return _public(_decode(row[0])) if row else None

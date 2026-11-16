@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 import postgres_api
 import postgres_identity
 import postgres_state
+import postgres_operational_monitor
 
 
 @contextmanager
@@ -76,6 +77,42 @@ class OperationalStatusTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["accounting_consistent"])
         self.assertIn("ACCOUNTING_INCONSISTENT", response.json()["risk_reasons"])
+
+    def test_outage_streak_and_recovery_are_sanitized(self):
+        with patch.object(postgres_operational_monitor, "_state", {
+            "consecutive_failures": 0,
+            "last_failure_at": None,
+            "last_recovery_at": None,
+            "last_failure_category": None,
+        }):
+            self.load.side_effect = RuntimeError("secret password=hidden")
+            for expected in (1, 2):
+                response = self.get(self.headers)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(
+                    response.json()["detail"]["monitor"]["consecutive_failures"],
+                    expected,
+                )
+                self.assertNotIn("password", response.text)
+            self.load.side_effect = None
+            response = self.get(self.headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.json()["monitor"]["consecutive_failures"], 0)
+            self.assertIsNotNone(
+                response.json()["monitor"]["last_recovery_at"])
+
+    def test_invalid_failure_category_is_normalized(self):
+        with patch.object(postgres_operational_monitor, "_state", {
+            "consecutive_failures": 0,
+            "last_failure_at": None,
+            "last_recovery_at": None,
+            "last_failure_category": None,
+        }):
+            postgres_operational_monitor.record_failure("password=secret")
+            snapshot = postgres_operational_monitor.snapshot()
+            self.assertEqual(snapshot["last_failure_category"], "DATABASE_ERROR")
+            self.assertNotIn("secret", str(snapshot))
 
     def test_database_failure_fails_closed(self):
         self.load.side_effect = RuntimeError("secret DSN and details")

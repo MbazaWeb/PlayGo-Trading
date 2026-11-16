@@ -28,6 +28,7 @@ import postgres_signal_store
 import postgres_emergency_stop
 import postgres_automated_risk
 import postgres_risk_audit
+import postgres_operational_monitor
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -326,6 +327,7 @@ def paper_automation_operational_status(authorization: str = Header(default=""))
             accounting = postgres_accounting.reconcile(conn)
         decision = postgres_automated_risk.controller.evaluate(
             state, accounting, automation_enabled=False)
+        postgres_operational_monitor.record_success()
         return {
             "mode": "PAPER",
             "phase": "7E",
@@ -338,12 +340,16 @@ def paper_automation_operational_status(authorization: str = Header(default=""))
             "accounting_consistent": accounting.get("consistent") is True,
             "risk_reasons": decision["reasons"],
             "database": "CONNECTED",
+            "monitor": postgres_operational_monitor.snapshot(),
         }
-    except (psycopg.Error, RuntimeError, KeyError, TypeError, ValueError):
+    except (psycopg.Error, RuntimeError, KeyError, TypeError, ValueError) as exc:
+        category = "DATABASE_ERROR" if isinstance(exc, psycopg.Error) else "STATE_ERROR"
+        postgres_operational_monitor.record_failure(category)
         raise HTTPException(503, detail={
             "mode": "PAPER", "phase": "7E", "execution": "DISABLED",
             "automation_enabled": False, "eligible": False,
             "database": "UNAVAILABLE",
+            "monitor": postgres_operational_monitor.snapshot(),
         })
 
 

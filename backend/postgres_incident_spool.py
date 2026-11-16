@@ -3,6 +3,7 @@
 The spool is opt-in and must reside on persistent, private storage. Never
 stores DSNs, passwords, SQL, exception text, or user data. No background job.
 """
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,7 @@ def _path():
     return path
 
 
+@contextmanager
 def _open():
     path = _path()
     # The operator must provision a private directory. Restrict file perms
@@ -38,11 +40,19 @@ def _open():
     conn = sqlite3.connect(str(path), timeout=5)
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("""CREATE TABLE IF NOT EXISTS incidents (
-        incident_id TEXT PRIMARY KEY, kind TEXT NOT NULL,
-        category TEXT NOT NULL, occurred_at INTEGER NOT NULL,
-        delivered INTEGER NOT NULL DEFAULT 0)""")
-    return conn
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS incidents (
+            incident_id TEXT PRIMARY KEY, kind TEXT NOT NULL,
+            category TEXT NOT NULL, occurred_at INTEGER NOT NULL,
+            delivered INTEGER NOT NULL DEFAULT 0)""")
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    finally:
+        conn.close()
 
 
 def enqueue(kind, category="DATABASE_ERROR"):

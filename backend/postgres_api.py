@@ -324,7 +324,7 @@ def paper_automation_operational_status(authorization: str = Header(default=""))
         with connect() as conn:
             state = postgres_state.load(conn)
             accounting = postgres_accounting.reconcile(conn)
-        decision = postgres_automated_risk.postgres_auto_controller.evaluate(
+        decision = postgres_automated_risk.controller.evaluate(
             state, accounting, automation_enabled=False)
         return {
             "mode": "PAPER",

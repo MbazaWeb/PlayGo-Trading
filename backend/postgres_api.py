@@ -316,6 +316,37 @@ def analytics_overview(authorization: str = Header(default="")):
         return postgres_analytics.snapshot(conn)
 
 
+@app.get("/api/paper/automation/operational-status")
+def paper_automation_operational_status(authorization: str = Header(default="")):
+    """Owner-only, read-only Phase 7E status. Fail closed on DB errors."""
+    owner(authorization)
+    try:
+        with connect() as conn:
+            state = postgres_state.load(conn)
+            accounting = postgres_accounting.reconcile(conn)
+        decision = postgres_automated_risk.postgres_auto_controller.evaluate(
+            state, accounting, automation_enabled=False)
+        return {
+            "mode": "PAPER",
+            "phase": "7E",
+            "execution": "OBSERVATION_ONLY",
+            "automation_enabled": False,
+            "eligible": False,
+            "state_revision": state["revision"],
+            "paused": state.get("paused") is True,
+            "emergency_stop": state.get("automation_emergency_stop") is True,
+            "accounting_consistent": accounting.get("consistent") is True,
+            "risk_reasons": decision["reasons"],
+            "database": "CONNECTED",
+        }
+    except (psycopg.Error, RuntimeError, KeyError, TypeError, ValueError):
+        raise HTTPException(503, detail={
+            "mode": "PAPER", "phase": "7E", "execution": "DISABLED",
+            "automation_enabled": False, "eligible": False,
+            "database": "UNAVAILABLE",
+        })
+
+
 @app.get("/api/state")
 def paper_state(authorization: str = Header(default="")):
     """Return the authoritative persisted paper state; no public write route."""

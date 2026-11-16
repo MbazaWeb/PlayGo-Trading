@@ -14,7 +14,7 @@ try {
         py -m compileall -q .
         if ($LASTEXITCODE -ne 0) { throw "Backend syntax compilation failed" }
         Write-Host "== Backend tests ==" -ForegroundColor Cyan
-        py -m unittest discover -s . -p "test_*.py" -v
+        py -m unittest discover -s tests -t . -p "test_*.py" -v
         if ($LASTEXITCODE -ne 0) { throw "Backend unit tests failed" }
     } finally { Pop-Location }
     Write-Host "== Frontend dependency setup ==" -ForegroundColor Cyan

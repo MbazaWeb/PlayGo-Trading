@@ -59,8 +59,8 @@ The backend loads the project-root `.env` automatically. Set `MONGODB_DATABASE` 
 
 ## Phase 2 — market-data-assisted paper agents (feature branch)
 
-The Phase 2 implementation adds `backend/agents.py`, `backend/feed.py`,
-`backend/worker.py`, `backend/test_agents.py`, `backend/test_feed.py`,
+The Phase 2 implementation adds `backend/app/agents.py`, `backend/app/feed.py`,
+`backend/app/worker.py`, `backend/tests/test_agents.py`, `backend/tests/test_feed.py`,
 a strategy proposal history on the dashboard, and automated simulation endpoints.
 
 **Important boundaries**: all executions remain PAPER, and there is deliberately
@@ -81,7 +81,7 @@ Copy-Item .env.example .env  # only if .env does not already exist
 # Edit .env, configure MongoDB URI, and leave FOREX_FEED=synthetic initially.
 cd backend
 py -m pip install -r requirements.txt
-py -m unittest discover -s . -p "test_*.py" -v
+py -m unittest discover -s tests -t . -p "test_*.py" -v
 py -m uvicorn main:app --reload --port 8000
 ```
 
@@ -95,7 +95,7 @@ npm run dev
 In a third terminal, if automatic 60-second simulation cycles are desired:
 ```powershell
 cd "C:\Users\Mbaza\Documents\PlayGo Trading\backend"
-py worker.py
+py -m app.worker
 ```
 
 **Run only one backend process and one worker against a given shared paper account.**

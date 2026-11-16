@@ -49,6 +49,16 @@ def main():
                       side_effect=lambda: psycopg.connect(dsn, connect_timeout=2)):
         client = TestClient(postgres_api.app)
         STAGE = "initial HTTP readiness"
+        initial = client.get("/api/ready")
+        if initial.status_code != 200:
+            with psycopg.connect(dsn, connect_timeout=2) as diagnostic_conn:
+                with diagnostic_conn.cursor() as cur:
+                    for table in ("playgo_private.owners", "playgo_private.documents"):
+                        cur.execute("SELECT to_regclass(%s)", (table,))
+                        print("CHECK: " + table + "=" +
+                              ("PRESENT" if cur.fetchone()[0] is not None else "MISSING"),
+                              flush=True)
+            print("CHECK: readiness HTTP " + str(initial.status_code), flush=True)
         check_response(client, 200)
         print("PASS: initial readiness 200; trading disabled", flush=True)
         stopped = False

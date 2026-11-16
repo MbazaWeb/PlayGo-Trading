@@ -30,6 +30,7 @@ import postgres_automated_risk
 import postgres_risk_audit
 import postgres_operational_monitor
 import postgres_incident_spool
+import postgres_readiness
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -56,13 +57,7 @@ def connect():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select to_regclass('playgo_private.owners')")
-            if cur.fetchone()[0] is None:
-                raise RuntimeError("Supabase private schema has not been applied")
-            cur.execute("select to_regclass('playgo_private.documents')")
-            if cur.fetchone()[0] is None:
-                raise RuntimeError("Supabase state schema has not been applied")
+        postgres_readiness.check(conn)
         postgres_accounting.initialize(conn)
         postgres_state.initialize(conn)
         postgres_accounting.post(conn, transaction_id="OPENING:PAPER:USD:10000",
@@ -89,11 +84,19 @@ def owner(authorization: str) -> str:
 
 @app.get("/api/health")
 def health():
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select 1")
-            cur.fetchone()
-    return {"ok": True, "mode": "PAPER", "database": "POSTGRESQL"}
+    """Public liveness only; never implies database or execution readiness."""
+    return {"ok": True, "mode": "PAPER", "execution": "DISABLED",
+            "automation_enabled": False, "eligible": False}
+
+
+@app.get("/api/ready")
+def readiness():
+    """Read-only database/schema readiness; sanitized failure responses."""
+    try:
+        with connect() as conn:
+            return postgres_readiness.check(conn)
+    except (psycopg.Error, OSError, RuntimeError, ValueError, TypeError):
+        raise HTTPException(503, detail=postgres_readiness.unavailable()) from None
 
 
 @app.post("/api/identity/bootstrap-owner")

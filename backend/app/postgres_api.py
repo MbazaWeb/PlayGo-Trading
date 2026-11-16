@@ -51,6 +51,8 @@ def connect():
         raise RuntimeError("DATABASE_URL must be a valid PostgreSQL connection string") from exc
     if not params.get("dbname") or not (params.get("host") or params.get("hostaddr")):
         raise RuntimeError("DATABASE_URL requires an explicit database and host")
+    if not params.get("user") or not params.get("password"):
+        raise RuntimeError("DATABASE_URL requires an explicit database user and password")
     return psycopg.connect(dsn, connect_timeout=8)
 
 

@@ -1,4 +1,5 @@
 """Isolated HTTP route contract tests; no database or broker access."""
+import os
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +10,15 @@ from app import postgres_ledger
 
 
 class PostgresApiContractTests(unittest.TestCase):
+    def test_database_url_without_password_is_rejected_before_connecting(self):
+        dsn = "postgresql://playgo_test@127.0.0.1:5432/playgo_disposable"
+        with patch.dict(os.environ, {"DATABASE_URL": dsn}), patch.object(
+            postgres_api.psycopg, "connect"
+        ) as connect:
+            with self.assertRaisesRegex(RuntimeError, "explicit database user and password"):
+                postgres_api.connect()
+        connect.assert_not_called()
+
     def test_public_registration_is_disabled(self):
         with self.assertRaises(HTTPException) as caught:
             postgres_api.register_disabled()

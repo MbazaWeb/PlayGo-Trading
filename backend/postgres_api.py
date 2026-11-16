@@ -80,6 +80,8 @@ def owner(authorization: str) -> str:
             return postgres_identity.verify_session(conn, authorization)
     except postgres_identity.OwnerAuthError as exc:
         raise HTTPException(401, str(exc)) from exc
+    except (psycopg.Error, OSError, RuntimeError, ValueError, TypeError):
+        raise HTTPException(503, "Authentication service unavailable") from None
 
 
 @app.get("/api/health")
@@ -130,6 +132,8 @@ def login(payload: Credentials):
             return postgres_identity.login(conn, **payload.model_dump())
     except postgres_identity.OwnerAuthError as exc:
         raise HTTPException(401, str(exc)) from exc
+    except (psycopg.Error, OSError, RuntimeError, ValueError, TypeError):
+        raise HTTPException(503, "Authentication service unavailable") from None
 
 
 @app.post("/api/identity/logout")
@@ -139,6 +143,8 @@ def logout(authorization: str = Header(default="")):
             postgres_identity.revoke_session(conn, authorization)
     except postgres_identity.OwnerAuthError as exc:
         raise HTTPException(401, str(exc)) from exc
+    except (psycopg.Error, OSError, RuntimeError, ValueError, TypeError):
+        raise HTTPException(503, "Authentication service unavailable") from None
     return {"revoked": True}
 
 

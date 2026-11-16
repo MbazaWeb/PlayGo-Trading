@@ -29,6 +29,7 @@ import postgres_emergency_stop
 import postgres_automated_risk
 import postgres_risk_audit
 import postgres_operational_monitor
+import postgres_incident_spool
 from demo_execution import DemoOrderError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -317,6 +318,54 @@ def analytics_overview(authorization: str = Header(default="")):
         return postgres_analytics.snapshot(conn)
 
 
+def _incident_spool_enabled():
+    return bool(os.getenv("PLAYGO_INCIDENT_SPOOL_PATH"))
+
+
+def _incident_enqueue(kind, category="DATABASE_ERROR"):
+    if not _incident_spool_enabled():
+        return
+    try:
+        postgres_incident_spool.enqueue(kind, category)
+    except (OSError, RuntimeError, ValueError) as exc:
+        # Monitoring must never override the API's fail-closed response.
+        # Do not log exception text: paths and sensitive values may leak.
+        import logging
+        logging.getLogger("playgo.operational").error(
+            "playgo_incident_spool_enqueue_failed kind=%s", kind)
+
+
+@app.post("/api/paper/automation/incidents/flush")
+def paper_automation_incidents_flush(authorization: str = Header(default="")):
+    """Owner-only explicit replay; no trading state changes or execution."""
+    owner(authorization)
+    if not _incident_spool_enabled():
+        raise HTTPException(503, "Incident spool not configured")
+    try:
+        with connect() as conn:
+            delivered = postgres_incident_spool.flush(conn)
+        return {"mode": "PAPER", "execution": "DISABLED",
+                "automation_enabled": False, "eligible": False,
+                "delivered": delivered,
+                "pending": postgres_incident_spool.pending_count()}
+    except (psycopg.Error, OSError, RuntimeError, ValueError):
+        raise HTTPException(503, "Incident replay unavailable") from None
+
+
+@app.get("/api/paper/automation/incidents")
+def paper_automation_incidents(limit: int = 25,
+                               authorization: str = Header(default="")):
+    """Owner-only sanitized persisted incident history."""
+    owner(authorization)
+    if not 1 <= limit <= 100:
+        raise HTTPException(400, "Invalid limit")
+    try:
+        with connect() as conn:
+            return postgres_incident_spool.list_recent(conn, limit)
+    except (psycopg.Error, RuntimeError):
+        raise HTTPException(503, "Incident history unavailable") from None
+
+
 @app.get("/api/paper/automation/diagnostics")
 def paper_automation_diagnostics(authorization: str = Header(default="")):
     """Owner-only process-local diagnostics. Never authorizes execution."""
@@ -334,7 +383,10 @@ def paper_automation_operational_status(authorization: str = Header(default=""))
             accounting = postgres_accounting.reconcile(conn)
         decision = postgres_automated_risk.controller.evaluate(
             state, accounting, automation_enabled=False)
+        prior_failures = postgres_operational_monitor.snapshot()["consecutive_failures"]
         postgres_operational_monitor.record_success()
+        if prior_failures:
+            _incident_enqueue("RECOVERY")
         return {
             "mode": "PAPER",
             "phase": "7E",
@@ -352,6 +404,8 @@ def paper_automation_operational_status(authorization: str = Header(default=""))
     except (psycopg.Error, RuntimeError, KeyError, TypeError, ValueError) as exc:
         category = "DATABASE_ERROR" if isinstance(exc, psycopg.Error) else "STATE_ERROR"
         postgres_operational_monitor.record_failure(category)
+        if postgres_operational_monitor.snapshot()["consecutive_failures"] == 1:
+            _incident_enqueue("OUTAGE", category)
         raise HTTPException(503, detail={
             "mode": "PAPER", "phase": "7E", "execution": "DISABLED",
             "automation_enabled": False, "eligible": False,

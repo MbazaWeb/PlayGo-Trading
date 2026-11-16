@@ -24,7 +24,7 @@ def validate(env=None):
             params = conninfo_to_dict(env["DATABASE_URL"])
             if not params.get("dbname") or not (params.get("host") or params.get("hostaddr")):
                 findings.append("DATABASE_URL requires an explicit database and host")
-        except (ValueError, Exception) as exc:
+        except Exception:
             # Never print connection details or parsing exceptions.
             findings.append("DATABASE_URL is not a valid PostgreSQL connection string")
     origins = [x.strip() for x in env.get("CORS_ORIGINS", "").split(",") if x.strip()]

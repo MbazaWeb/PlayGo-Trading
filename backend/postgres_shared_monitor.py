@@ -25,8 +25,12 @@ def _connection():
     if not path.parent.is_dir() or path.is_dir():
         raise RuntimeError("Shared monitor directory unavailable")
     if not path.exists():
-        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-        os.close(fd)
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(fd)
     conn = sqlite3.connect(str(path), timeout=5, isolation_level=None)
     try:
         conn.execute("PRAGMA busy_timeout=5000")

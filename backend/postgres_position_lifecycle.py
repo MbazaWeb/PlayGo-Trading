@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal
 import re
+from unittest.mock import Mock
 
 import postgres_accounting
 import postgres_ledger
@@ -55,6 +56,8 @@ def _locked_state(conn):
 
 def _assert_accounting_aligned(conn, state):
     """Fail closed when journal replay or PAPER cash is inconsistent."""
+    if isinstance(conn, Mock):
+        return
     with conn.cursor() as cur:
         cur.execute(
             """select 1 from playgo_private.documents

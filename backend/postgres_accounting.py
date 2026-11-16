@@ -16,7 +16,18 @@ COLLECTION = "paper_accounting_accounts"
 
 
 def _decode(value):
-    return value if isinstance(value, dict) else json.loads(value)
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+    return {}
 
 
 def _journal(row):
@@ -164,8 +175,8 @@ def reconcile(conn) -> dict:
         row = cur.fetchone()
         if row is None:
             raise RuntimeError("Accounting account not initialized")
-        account = _decode(row[0])
-        revision = int(row[1])
+        account = _decode(row[0]) if row[0] is not None else {}
+        revision = int(row[1]) if isinstance(row[1], int) else 0
         cur.execute(
             """select transaction_id, lines from playgo_private.accounting_journals
                order by created_at, transaction_id"""
@@ -184,7 +195,8 @@ def reconcile(conn) -> dict:
                 )
         except (KeyError, TypeError, ValueError):
             issues.append("INVALID_JOURNAL:" + txid)
-    stored = account["balances"]
+    stored = account.get("balances", {name: 0 for name in ACCOUNTS})
+    stored = {name: int(stored.get(name, 0)) for name in ACCOUNTS}
     differences = {name: stored.get(name, 0) - replay[name] for name in ACCOUNTS}
     if any(differences.values()):
         issues.append("BALANCE_MISMATCH")

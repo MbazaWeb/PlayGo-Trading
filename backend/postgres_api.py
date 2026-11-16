@@ -317,6 +317,13 @@ def analytics_overview(authorization: str = Header(default="")):
         return postgres_analytics.snapshot(conn)
 
 
+@app.get("/api/paper/automation/diagnostics")
+def paper_automation_diagnostics(authorization: str = Header(default="")):
+    """Owner-only process-local diagnostics. Never authorizes execution."""
+    owner(authorization)
+    return postgres_operational_monitor.diagnostics()
+
+
 @app.get("/api/paper/automation/operational-status")
 def paper_automation_operational_status(authorization: str = Header(default="")):
     """Owner-only, read-only Phase 7E status. Fail closed on DB errors."""

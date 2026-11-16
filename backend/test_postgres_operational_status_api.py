@@ -31,9 +31,11 @@ class OperationalStatusTests(TestCase):
                                  return_value=self.state)
         self.reconcile = patch.object(postgres_api.postgres_accounting,
                                       "reconcile", return_value=self.accounting)
-        for p in (self.auth, self.connect, self.load, self.reconcile):
-            p.start()
-            self.addCleanup(p.stop)
+        for name in ("auth", "connect", "load", "reconcile"):
+            patcher = getattr(self, name)
+            mock = patcher.start()
+            self.addCleanup(patcher.stop)
+            setattr(self, name, mock)
 
     @staticmethod
     def verify(conn, authorization):

@@ -6,6 +6,8 @@ container. This test never changes application trading state or live accounts.
 import os
 import sys
 import time
+
+STAGE = 'initial validation'
 from unittest.mock import patch
 
 import psycopg
@@ -38,22 +40,30 @@ def check_response(client, expected):
 
 
 def main():
+    global STAGE
+    STAGE = 'isolated container and DSN validation'
     dsn, container_id = validate()
+    STAGE = 'initial database connection'
     wait_until(lambda: db_ready(dsn), 30, "Initial isolated database readiness")
     with patch.object(postgres_api, "connect",
                       side_effect=lambda: psycopg.connect(dsn, connect_timeout=2)):
         client = TestClient(postgres_api.app)
+        STAGE = "initial HTTP readiness"
         check_response(client, 200)
         print("PASS: initial readiness 200; trading disabled", flush=True)
         stopped = False
         try:
+            STAGE = "isolated Docker stop"
             check_identity(container_id)
             docker("stop", "--time", "10", "playgo-phase7d-db", timeout=30)
             stopped = True
+            STAGE = "database outage detection"
             wait_until(lambda: not db_ready(dsn), 30,
                        "Isolated database outage")
+            STAGE = "HTTP 503 outage readiness"
             check_response(client, 503)
             print("PASS: database outage readiness 503; fail closed", flush=True)
+            STAGE = "independent liveness"
             live = client.get("/api/health")
             if (live.status_code != 200 or live.json().get("eligible") is not False
                     or live.json().get("execution") != "DISABLED"):
@@ -61,10 +71,13 @@ def main():
             print("PASS: liveness remains independent and non-eligible", flush=True)
         finally:
             if stopped:
+                STAGE = "isolated Docker restoration"
                 check_identity(container_id)
                 docker("start", "playgo-phase7d-db", timeout=30)
                 print("RESTORE: isolated PostgreSQL container start requested", flush=True)
+        STAGE = "database recovery connection"
         wait_until(lambda: db_ready(dsn), 90, "Isolated database recovery")
+        STAGE = "HTTP readiness recovery"
         deadline = time.monotonic() + 30
         while True:
             response = client.get("/api/ready")
@@ -83,5 +96,5 @@ if __name__ == "__main__":
         main()
     except (RuntimeError, AssertionError, OSError) as exc:
         # Never print exception details; a connection error may contain secrets.
-        print("FAIL: isolated readiness outage test failed", file=sys.stderr)
+        print(f"FAIL: isolated readiness outage test failed at stage: {STAGE}", file=sys.stderr)
         sys.exit(1)

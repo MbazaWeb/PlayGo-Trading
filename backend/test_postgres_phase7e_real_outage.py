@@ -5,6 +5,7 @@ records. Operator stops and restarts the isolated container in another shell.
 Authentication is replaced ONLY in this in-process test client.
 """
 import os
+import time
 from unittest.mock import patch
 
 import psycopg
@@ -63,12 +64,27 @@ def main():
                     or detail.get("monitor", {}).get("consecutive_failures") != expected):
                 raise AssertionError(f"Outage probe {expected} failed: HTTP {code}")
             print(f"PASS: real outage HTTP 503, consecutive failures {expected}")
-        input("START ONLY the playgo-phase7d-db Docker container, wait until ready, then press Enter...")
-        code, body = probe(client)
-        if (code != 200 or body.get("eligible") is not False
+        input("START ONLY the playgo-phase7d-db Docker container, then press Enter...")
+        # PostgreSQL may accept connections inside Docker before the Windows
+        # loopback forwarding path is ready. Poll the SAME client and DSN
+        # for up to 60 seconds instead of treating startup latency as failure.
+        deadline = time.monotonic() + 60
+        while True:
+            code, body = probe(client)
+            if code == 200:
+                break
+            if code != 503:
+                raise AssertionError(f"Unexpected recovery HTTP {code}")
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    "Recovery timed out after 60s; last response HTTP 503. "
+                    "Verify Windows 127.0.0.1:5432 and Docker readiness."
+                )
+            time.sleep(2)
+        if (body.get("eligible") is not False
                 or body.get("monitor", {}).get("consecutive_failures") != 0
                 or body.get("monitor", {}).get("last_recovery_at") is None):
-            raise AssertionError(f"Recovery probe failed: HTTP {code}")
+            raise AssertionError("Recovery status failed safety or monitor assertions")
         print("PASS: real PostgreSQL recovery; failure streak cleared; execution disabled")
         print("Phase 7E.3: ALL CHECKS PASSED")
 

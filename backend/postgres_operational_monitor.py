@@ -44,3 +44,25 @@ def record_success():
 def snapshot():
     with _lock:
         return dict(_state)
+
+
+def diagnostics():
+    """Sanitized, read-only Phase 7F.1 status; never implies execution readiness.
+
+    This is process-local telemetry, not durable audit or multi-worker health.
+    """
+    state = snapshot()
+    failures = state["consecutive_failures"]
+    return {
+        "phase": "7F.1",
+        "mode": "PAPER",
+        "execution": "DISABLED",
+        "automation_enabled": False,
+        "eligible": False,
+        "monitor_scope": "PROCESS_LOCAL",
+        "health": "DEGRADED" if failures else "NO_RECORDED_FAILURES",
+        "consecutive_failures": failures,
+        "last_failure_at": state["last_failure_at"],
+        "last_recovery_at": state["last_recovery_at"],
+        "last_failure_category": state["last_failure_category"],
+    }

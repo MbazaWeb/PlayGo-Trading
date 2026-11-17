@@ -17,7 +17,7 @@ class AutomatedRiskTests(unittest.TestCase):
         self.accounting = {"consistent": True,
                            "balances_cents": {"CASH": 1_000_000}}
         self.proposal = {"pair": "EURUSD", "side": "BUY", "units": 1000,
-                         "entry_price": "1.085", "stop_loss": "1.080"}
+                         "entry_price": "1.085", "stop_loss": "1.084"}
 
     def assess(self):
         return risk.assess(self.state, self.accounting, proposal=self.proposal,
@@ -28,7 +28,26 @@ class AutomatedRiskTests(unittest.TestCase):
         result = self.assess()
         self.assertTrue(result["eligible"], result["reasons"])
         self.assertEqual(result["execution"], "OBSERVATION_ONLY")
+        self.assertEqual(result["daily_loss_budget"]["remaining_usd"], "2.00")
         self.assertEqual(self.state, before)
+
+    def test_loss_budget_is_recalculated_before_each_proposal(self):
+        self.state["trades"] = [{
+            "closed_at": self.now.isoformat(), "pnl": "-1.50",
+        }]
+        result = self.assess()
+        self.assertIn("DAILY_LOSS_LIMIT", result["reasons"])
+        self.assertEqual(result["daily_loss_budget"]["remaining_usd"], "0.50")
+        self.assertFalse(result["eligible"])
+
+    def test_loss_budget_resets_by_utc_day_not_local_process_time(self):
+        yesterday = self.now - timedelta(days=1)
+        self.state["trades"] = [{
+            "closed_at": yesterday.isoformat(), "pnl": "-2.00",
+        }]
+        result = self.assess()
+        self.assertTrue(result["eligible"], result["reasons"])
+        self.assertEqual(result["daily_loss_budget"]["remaining_usd"], "2.00")
 
     def test_cooldown_rejects_recent_entry(self):
         self.state["last_automated_entry_at"] = (

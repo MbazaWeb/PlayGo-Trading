@@ -1,7 +1,7 @@
 """Isolated HTTP route contract tests; no database or broker access."""
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -60,6 +60,80 @@ class PostgresApiContractTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as caught:
                 postgres_api.pending_demo_orders(limit=201, authorization="Bearer test")
         self.assertEqual(caught.exception.status_code, 400)
+
+
+class ResearchApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_backtest_is_read_only_and_returns_research_mode(self):
+        candles = []
+        for index in range(5):
+            candles.append({
+                "epoch": 1_800_000_000 + index * 300,
+                "open": "1.10000",
+                "high": "1.10010",
+                "low": "1.09990",
+                "close": "1.10000",
+            })
+        candles.extend([
+            {
+                "epoch": 1_800_001_500,
+                "open": "1.10000",
+                "high": "1.10050",
+                "low": "1.09990",
+                "close": "1.10030",
+            },
+            {
+                "epoch": 1_800_001_800,
+                "open": "1.10030",
+                "high": "1.10080",
+                "low": "1.10020",
+                "close": "1.10070",
+            },
+        ])
+        with patch.object(postgres_api, "owner"), patch.object(
+            postgres_api.deriv_market_data,
+            "fetch_public_candles",
+            new=AsyncMock(return_value={"candles": candles}),
+        ) as fetch, patch.object(postgres_api, "connect") as connect:
+            result = await postgres_api.research_breakout(
+                pair="EURUSD",
+                granularity=300,
+                count=100,
+                lookback=5,
+                authorization="Bearer test",
+            )
+
+        self.assertEqual(result["execution"], "RESEARCH_ONLY")
+        self.assertEqual(result["data_source"], "DERIV_PUBLIC_CANDLES")
+        fetch.assert_awaited_once_with(
+            "frxEURUSD", count=100, granularity=300)
+        connect.assert_not_called()
+
+    async def test_backtest_rejects_unsupported_pair_before_fetch(self):
+        with patch.object(postgres_api, "owner"), patch.object(
+            postgres_api.deriv_market_data,
+            "fetch_public_candles",
+            new=AsyncMock(),
+        ) as fetch:
+            with self.assertRaises(HTTPException) as caught:
+                await postgres_api.research_breakout(
+                    pair="USDJPY", authorization="Bearer test")
+
+        self.assertEqual(caught.exception.status_code, 400)
+        fetch.assert_not_awaited()
+
+    async def test_backtest_rejects_invalid_candle_interval_before_fetch(self):
+        with patch.object(postgres_api, "owner"), patch.object(
+            postgres_api.deriv_market_data,
+            "fetch_public_candles",
+            new=AsyncMock(),
+        ) as fetch:
+            with self.assertRaises(HTTPException) as caught:
+                await postgres_api.research_breakout(
+                    pair="EURUSD", granularity=61,
+                    authorization="Bearer test")
+
+        self.assertEqual(caught.exception.status_code, 400)
+        fetch.assert_not_awaited()
 
 
 if __name__ == "__main__":

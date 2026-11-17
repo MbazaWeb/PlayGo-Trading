@@ -19,21 +19,37 @@ PlayGo owner, then authorize on Deriv. PKCE, a 10-minute state cookie, owner
 session validation, and HTTPS-only HttpOnly encrypted cookies protect the flow.
 The token exchange runs only on the backend. Tokens are not returned to JavaScript
 or stored in plaintext. The connection expires after at most eight hours. An encrypted copy is stored in the existing private documents table, keyed by the authenticated PlayGo owner; no new database schema is required.
-Deriv requires the `trade` OAuth scope even for GET /trading/v1/options/accounts.
-The callback requests that scope, and the application exposes only read-only balance
-retrieval. No trading or payment commands are implemented. Reconnect after this
-update to grant balance access. GET /api/deriv/accounts requires the PlayGo owner
-bearer session, returns explicitly labelled demo and real accounts, and never substitutes demo money.
+Deriv requires the `trade` OAuth scope for Options accounts and demo trading.
+GET /api/deriv/accounts requires a PlayGo owner bearer session, returns explicitly
+labelled demo and real accounts, and never substitutes demo money.
 Balances are fetched from Deriv on each request and shown by currency; wallets
 and MT5 balances are not included. Missing balances are unavailable, never zero.
 Provider 401/403 requests reconnection; upstream failures do not expose raw data.
+
+The Deriv sign-in session also enables the explicitly started demo bot. It is
+restricted server-side to verified USD demo Options accounts and uses a 5-minute
+EMA 9/21 signal on EUR/USD. Upward crosses buy Rise/CALL contracts and downward
+crosses buy Fall/PUT contracts. Each stake is USD 2; total demo stakes are capped
+at USD 5 per UTC day, allowing at most two contracts. This caps possible stake
+losses, rather than calculating realized daily P&L. The bot is driven
+by requests from the open PlayGo page, trades at most one contract at a time,
+and does not close an existing contract when stopped. Start/stop are available
+at `/api/deriv/demo-bot/start` and `/stop`, with `/api/bot/start` and `/stop`
+aliases for clients using the shorter paths. Real-account execution, deposits,
+and withdrawals remain disabled.
+
+Demo bot run history is recorded in `playgo_private.bot_runs`; the existing
+`playgo_private.documents` state remains authoritative for daily stake limits
+and trade recovery. Apply the updated `sql/supabase_foundation.sql` to the
+PostgreSQL database before deploying this version. Each run stores only the
+SHA-256 digest of its Deriv session token, never the bearer token itself.
 
 Check `/`, `/api/health`, and `/api/ready` after deployment. A direct callback visit
 without starting OAuth should return a readable HTTP 400, never a runtime crash.
 Do not log OAuth authorization codes, callback query strings, or tokens. Platform
 request logs may retain callback URLs; restrict their access and retention.
 
-Tests: `python -m unittest tests.test_deriv_oauth -v` from `backend/`.
+Tests: `python -m unittest tests.test_deriv_demo_bot tests.test_deriv_oauth tests.test_deriv_signin -v` from `backend/`.
 
 The frontend defaults to the Deriv account view. The paper simulator is available
 only through its separate view and retains its previous balance and positions.
@@ -49,9 +65,10 @@ closes after authorization. No credentials or tokens appear in a URL. Deriv
 tokens remain encrypted server-side; the separate app bearer token is hashed for
 database lookup.
 
-These sessions may only read Deriv balances and revoke themselves. They cannot
-authenticate as an owner or access the shared paper account. Owner sign-in remains
-a separate option. Session lifetime is at most eight hours.
+These sessions can read Deriv balances, start/stop the verified demo bot, and
+revoke themselves. They cannot authenticate as an owner or access the shared
+paper account. Owner sign-in remains a separate option. Session lifetime is at
+most eight hours.
 
 GET /api/deriv/accounts now returns both real and demo Options accounts, preserving
 Deriv's explicit account_type. The account selector displays DEMO / VIRTUAL FUNDS

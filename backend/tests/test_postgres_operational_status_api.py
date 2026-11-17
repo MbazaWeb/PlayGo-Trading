@@ -63,6 +63,8 @@ class OperationalStatusTests(TestCase):
         self.assertFalse(data["eligible"])
         self.assertEqual(data["state_revision"], 4)
         self.assertIn("AUTOMATION_DISABLED", data["risk_reasons"])
+        self.assertEqual(data["daily_loss_budget"]["limit_usd"], "2.00")
+        self.assertEqual(data["daily_loss_budget"]["remaining_usd"], "2.00")
 
     def test_emergency_stop_is_reported(self):
         self.state["automation_emergency_stop"] = True

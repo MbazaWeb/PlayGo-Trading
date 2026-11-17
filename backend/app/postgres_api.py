@@ -32,6 +32,8 @@ from app import postgres_operational_monitor
 from app import postgres_incident_spool
 from app import postgres_readiness
 from app.demo_execution import DemoOrderError
+from app import breakout_backtest
+from app import deriv_market_data
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
@@ -329,6 +331,55 @@ def analytics_overview(authorization: str = Header(default="")):
         return postgres_analytics.snapshot(conn)
 
 
+@app.get("/api/research/breakout")
+async def research_breakout(
+    pair: str = "EURUSD",
+    granularity: int = 300,
+    count: int = 500,
+    lookback: int = 20,
+    risk_percent: str = "0.5",
+    stop_atr_multiple: str = "1.5",
+    reward_risk: str = "2",
+    estimated_spread_pips: str = "0.5",
+    max_spread_pips: str = "1.5",
+    slippage_pips: str = "0.1",
+    authorization: str = Header(default=""),
+):
+    """Run a read-only breakout backtest; never submits or persists orders."""
+    owner(authorization)
+    symbols = {"EURUSD": "frxEURUSD", "GBPUSD": "frxGBPUSD"}
+    if pair not in symbols:
+        raise HTTPException(400, "Unsupported research pair")
+    try:
+        deriv_market_data.candles_request(
+            symbols[pair], count=count, granularity=granularity)
+    except deriv_market_data.DerivMarketDataError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        history = await deriv_market_data.fetch_public_candles(
+            symbols[pair], count=count, granularity=granularity)
+        result = breakout_backtest.backtest_breakout(
+            history["candles"],
+            pair=pair,
+            lookback=lookback,
+            risk_percent=risk_percent,
+            stop_atr_multiple=stop_atr_multiple,
+            reward_risk=reward_risk,
+            estimated_spread_pips=estimated_spread_pips,
+            max_spread_pips=max_spread_pips,
+            slippage_pips=slippage_pips,
+        )
+    except deriv_market_data.DerivMarketDataError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except breakout_backtest.BacktestInputError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        **result,
+        "data_source": "DERIV_PUBLIC_CANDLES",
+        "granularity_seconds": granularity,
+    }
+
+
 def _incident_spool_enabled():
     return bool(os.getenv("PLAYGO_INCIDENT_SPOOL_PATH"))
 
@@ -392,6 +443,7 @@ def paper_automation_operational_status(authorization: str = Header(default=""))
         with connect() as conn:
             state = postgres_state.load(conn)
             accounting = postgres_accounting.reconcile(conn)
+        daily_loss_budget = postgres_positions.daily_loss_usage(state)
         decision = postgres_automated_risk.controller.evaluate(
             state, accounting, automation_enabled=False)
         prior_failures = postgres_operational_monitor.snapshot()["consecutive_failures"]
@@ -409,6 +461,7 @@ def paper_automation_operational_status(authorization: str = Header(default=""))
             "emergency_stop": state.get("automation_emergency_stop") is True,
             "accounting_consistent": accounting.get("consistent") is True,
             "risk_reasons": decision["reasons"],
+            "daily_loss_budget": daily_loss_budget,
             "database": "CONNECTED",
             "monitor": postgres_operational_monitor.snapshot(),
         }
@@ -620,3 +673,20 @@ def paper_risk_assessment_detail(assessment_id: str,
     if result is None:
         raise HTTPException(404, "Risk assessment not found")
     return result
+
+
+@app.get("/api/market/candles")
+async def market_candles(pair: str = "EURUSD", granularity: int = 300,
+                         count: int = 80, authorization: str = Header(default="")):
+    """Authenticated read-only market chart, separate from paper execution."""
+    owner(authorization)
+    symbol = "frx" + pair
+    try:
+        deriv_market_data.candles_request(symbol, count=count, granularity=granularity)
+    except deriv_market_data.DerivMarketDataError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        return await deriv_market_data.fetch_public_candles(
+            symbol, count=count, granularity=granularity)
+    except deriv_market_data.DerivMarketDataError as exc:
+        raise HTTPException(503, str(exc)) from exc

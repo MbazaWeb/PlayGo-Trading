@@ -35,6 +35,19 @@ create table if not exists playgo_private.accounting_journals (
   lines jsonb not null,
   created_at timestamptz not null default now()
 );
+create table if not exists playgo_private.bot_runs (
+  id uuid primary key default gen_random_uuid(),
+  session_id text not null check (session_id ~ '^[0-9a-f]{64}$'),
+  account_id text not null,
+  status text not null default 'running' check (status in ('running', 'stopped', 'error')),
+  config jsonb not null,
+  pnl numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  stopped_at timestamptz
+);
+create index if not exists playgo_bot_runs_session_account_idx
+  on playgo_private.bot_runs (session_id, account_id, created_at desc);
 -- No anon/authenticated grants. Application must use a server-side PostgreSQL connection.
 
 -- Defense in depth: even if the schema is later exposed, no public access policies exist.
@@ -42,3 +55,4 @@ alter table playgo_private.documents enable row level security;
 alter table playgo_private.owner_sessions enable row level security;
 alter table playgo_private.trade_events enable row level security;
 alter table playgo_private.accounting_journals enable row level security;
+alter table playgo_private.bot_runs enable row level security;

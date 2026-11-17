@@ -36,6 +36,13 @@ git pull origin main
 Use `GET http://127.0.0.1:8001/api/ready` and verify `ready=true` and
 `database=CONNECTED` before attempting login.
 
+After login, `GET /api/paper/automation/operational-status` reports the
+UTC-day paper loss budget: realized losing trades plus the greater of each
+open position's stop risk or current unrealized loss. The $2.00 limit is used
+by risk assessments to reject proposals that exceed the remaining budget.
+This endpoint is observation-only; it does not activate automated entries or
+guarantee a maximum loss.
+
 ## Bootstrap safety
 
 The one-time bootstrap endpoint is restricted to explicit `PLAYGO_ENV=local`, loopback connections and

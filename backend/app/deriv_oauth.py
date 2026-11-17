@@ -46,7 +46,7 @@ def page(title, message, status=200):
 
 @router.get('/deriv/connect', response_class=HTMLResponse)
 def connect_page():
-    return page('Connect Deriv', '<p>Sign in with your PlayGo owner credentials to start the Deriv connection. Deriv will ask you to sign in and consent on its own website.</p><form method="post" action="/api/deriv/oauth/start"><label>PlayGo username<input name="username" required autocomplete="username"></label><label>PlayGo password<input name="password" type="password" required autocomplete="current-password"></label><button>Continue to Deriv</button></form><small>Deriv requires the trade permission to read Options account balances. PlayGo only reads account data and does not place trades or transfer funds.</small>')
+    return page('Connect Deriv', '<p>Sign in with your PlayGo owner credentials to start the Deriv connection. Deriv will ask you to sign in and consent on its own website.</p><form method="post" action="/api/deriv/oauth/start"><label>PlayGo username<input name="username" required autocomplete="username"></label><label>PlayGo password<input name="password" type="password" required autocomplete="current-password"></label><button>Continue to Deriv</button></form><small>PlayGo can place demo Options contracts only when you explicitly start the demo bot. Real-account trading and transfers are disabled.</small>')
 
 
 @router.post('/api/deriv/oauth/start')
@@ -150,7 +150,7 @@ async def callback(request: Request):
             else:
                 from app.deriv_accounts import save_connection
                 save_connection(owner_id, connection)
-                response = page('Deriv connected', '<p>Your authorization was received securely. Your demo and real Options account balances are available in PlayGo.</p><p>Live trading and transfers remain disabled. <a href="https://playgo-ai-trading.vercel.app/">Return to PlayGo</a>.</p>')
+                response = page('Deriv connected', '<p>Your authorization was received securely. Your demo and real Options account balances are available in PlayGo.</p><p>The bot can place demo Options contracts only after you explicitly start it. Real-account trading and transfers remain disabled. <a href="https://playgo-ai-trading.vercel.app/">Return to PlayGo</a>.</p>')
                 response.set_cookie(CONNECTION_COOKIE, cipher().encrypt(json.dumps(connection).encode()).decode(), max_age=lifetime, secure=True, httponly=True, samesite='lax', path='/api/deriv')
         except (httpx.HTTPError, psycopg.Error, OSError, RuntimeError, ValueError, KeyError, TypeError):
             response = page('Connection unsuccessful', '<p>Deriv could not complete authorization. Check the registered client ID and exact redirect URL, then <a href="/deriv/connect">try again</a>.</p>', 502)

@@ -22,6 +22,11 @@ def assess(state, accounting, *, proposal, automation_enabled=False, now=None):
         state, accounting, automation_enabled=automation_enabled, now=now)
     reasons = list(gate["reasons"])
     assessment = None
+    try:
+        daily_loss_budget = positions.daily_loss_usage(state, now=now)
+    except (KeyError, TypeError, ValueError, positions.RiskRejected):
+        daily_loss_budget = None
+        reasons.append("INVALID_DAILY_LOSS_STATE")
     if not isinstance(proposal, dict):
         reasons.append("INVALID_PROPOSAL")
     else:
@@ -36,6 +41,11 @@ def assess(state, accounting, *, proposal, automation_enabled=False, now=None):
                 stop_loss=proposal["stop_loss"])
         except (KeyError, TypeError, ValueError, positions.RiskRejected):
             reasons.append("POSITION_RISK_REJECTED")
+    if assessment is not None and daily_loss_budget is not None:
+        proposal_risk = positions.number(assessment["risk_usd"])
+        remaining = positions.number(daily_loss_budget["remaining_usd"])
+        if proposal_risk > remaining:
+            reasons.append("DAILY_LOSS_LIMIT")
     # Automated limits are stricter than manual PAPER position limits.
     if assessment is not None:
         try:
@@ -69,5 +79,6 @@ def assess(state, accounting, *, proposal, automation_enabled=False, now=None):
         "eligible": not reasons, "reasons": reasons,
         "checked_at": now.isoformat(),
         "cooldown_seconds": COOLDOWN_SECONDS,
+        "daily_loss_budget": daily_loss_budget,
         "assessment": assessment,
     }

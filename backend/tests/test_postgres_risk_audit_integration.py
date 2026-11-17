@@ -24,7 +24,7 @@ class _Rollback(Exception):
     pass
 
 
-def test_dsn():
+def configured_test_dsn():
     dsn = os.getenv("DATABASE_URL", "")
     if not dsn:
         raise AssertionError("DATABASE_URL is required")
@@ -60,7 +60,7 @@ def audit_count(conn, assessment_id):
                      "Requires explicit PostgreSQL TEST opt-in")
 class RiskAuditIntegrationTests(unittest.TestCase):
     def test_idempotency_conflict_and_rollback(self):
-        dsn = test_dsn()
+        dsn = configured_test_dsn()
         assessment_id = "phase7d_" + uuid4().hex
         with psycopg.connect(dsn, connect_timeout=8) as conn:
             before = postgres_state.load(conn)
@@ -99,7 +99,7 @@ class RiskAuditIntegrationTests(unittest.TestCase):
                              before_accounting)
 
     def test_concurrent_uncommitted_assessment_is_not_visible(self):
-        dsn = test_dsn()
+        dsn = configured_test_dsn()
         assessment_id = "phase7d_lock_" + uuid4().hex
         with psycopg.connect(dsn, connect_timeout=8) as first, \
              psycopg.connect(dsn, connect_timeout=8) as second:

@@ -26,8 +26,12 @@ def assess(state, accounting, *, proposal, automation_enabled=False, now=None):
         reasons.append("INVALID_PROPOSAL")
     else:
         try:
+            # Preview-only copy: do not change authoritative engine state.
+            # The operational gate still blocks paused execution.
+            preview_state = dict(state)
+            preview_state["paused"] = False
             assessment = positions.validate_open(
-                state, pair=proposal["pair"], side=proposal["side"],
+                preview_state, pair=proposal["pair"], side=proposal["side"],
                 units=proposal["units"], entry_price=proposal["entry_price"],
                 stop_loss=proposal["stop_loss"])
         except (KeyError, TypeError, ValueError, positions.RiskRejected):

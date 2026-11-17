@@ -23,7 +23,7 @@ class _Rollback(Exception):
     pass
 
 
-def test_dsn():
+def configured_test_dsn():
     dsn = os.getenv("DATABASE_URL", "")
     if not dsn:
         raise AssertionError("DATABASE_URL is required")
@@ -44,7 +44,7 @@ def test_dsn():
                      "Requires explicit PostgreSQL TEST opt-in")
 class EmergencyStopIntegrationTests(unittest.TestCase):
     def test_stop_is_one_way_idempotent_and_rolled_back(self):
-        dsn = test_dsn()
+        dsn = configured_test_dsn()
         with psycopg.connect(dsn, connect_timeout=8) as conn:
             before = postgres_state.load(conn)
             self.assertFalse(before.get("automation_emergency_stop", False),
@@ -73,7 +73,7 @@ class EmergencyStopIntegrationTests(unittest.TestCase):
                              "Emergency stop escaped rollback")
 
     def test_second_connection_cannot_override_uncommitted_stop(self):
-        dsn = test_dsn()
+        dsn = configured_test_dsn()
         with psycopg.connect(dsn, connect_timeout=8) as first, \
              psycopg.connect(dsn, connect_timeout=8) as second:
             before = postgres_state.load(first)

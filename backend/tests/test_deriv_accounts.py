@@ -36,9 +36,9 @@ class RealBalanceTests(unittest.TestCase):
         with patch.object(postgres_api,'owner',return_value='owner-1'),patch.object(accounts,'load_connection',return_value=None),patch.object(accounts.httpx,'AsyncClient') as client:
             r=self.client.get('/api/deriv/accounts');self.assertFalse(r.json()['connected']);self.assertEqual(r.json()['accounts'],[]);client.assert_not_called()
 
-    def test_demo_funds_excluded_and_zero_real_balance_preserved(self):
+    def test_demo_and_real_balances_remain_separately_labelled(self):
         r=self.query({'data':[{'account_id':'demo','account_type':'demo','balance':10000,'currency':'USD'},{'account_id':'real','account_type':'real','balance':0,'currency':'USD'}]})
-        self.assertEqual(r.status_code,200);self.assertEqual(r.json()['accounts'],[{'account_id':'real','account_type':'real','balance':'0','currency':'USD'}])
+        self.assertEqual(r.status_code,200);self.assertEqual(r.json()['accounts'],[{'account_id':'demo','account_type':'demo','balance':'10000','currency':'USD'},{'account_id':'real','account_type':'real','balance':'0','currency':'USD'}])
         self.assertEqual(r.headers['cache-control'],'no-store')
         self.assertEqual(r.json()['execution'],'DISABLED')
 
@@ -85,3 +85,10 @@ class RealBalanceTests(unittest.TestCase):
             with self.subTest(owner_id=owner_id),patch.object(postgres_api,'connect') as connect,patch('app.deriv_oauth.cipher',return_value=f),patch('app.deriv_oauth.config',return_value=('client','https://api.example/callback')):
                 connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone.return_value=(body,)
                 self.assertIsNone(accounts.load_connection('owner-1'))
+
+    def test_deriv_signin_session_does_not_call_owner_auth(self):
+        client=AsyncMock();result=Mock(status_code=200);result.json.return_value={'data':[]};client.get.return_value=result
+        with patch.object(postgres_api,'owner') as owner,patch('app.deriv_signin.read_session',return_value=self.connection),patch.object(accounts.httpx,'AsyncClient') as cls:
+            cls.return_value.__aenter__.return_value=client
+            response=self.client.get('/api/deriv/accounts',headers={'Authorization':'Bearer deriv_'+('a'*64)})
+        self.assertEqual(response.status_code,200);owner.assert_not_called()

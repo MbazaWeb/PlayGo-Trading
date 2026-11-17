@@ -74,3 +74,31 @@ class OAuthTests(unittest.TestCase):
         self.begin()
         with patch.object(Fernet,'decrypt',side_effect=oauth.InvalidToken):
             self.assertEqual(self.client.get('/api/deriv/oauth/callback?code=x&state=x').status_code,400)
+
+    def test_direct_signin_needs_no_owner_credentials(self):
+        with patch.dict(os.environ,{'CORS_ORIGINS':'https://playgo-ai-trading.vercel.app'}),patch.object(postgres_api,'login') as login:
+            response=self.client.get('/api/deriv/oauth/signin?origin=https://playgo-ai-trading.vercel.app')
+        self.assertEqual(response.status_code,303);login.assert_not_called()
+        params=parse_qs(urlsplit(response.headers['location']).query)
+        self.assertEqual(params['code_challenge_method'],['S256'])
+
+    def test_direct_signin_rejects_foreign_origin(self):
+        with patch.dict(os.environ,{'CORS_ORIGINS':'https://playgo-ai-trading.vercel.app'}):
+            self.assertEqual(self.client.get('/api/deriv/oauth/signin?origin=https://attacker.example').status_code,400)
+
+    def test_direct_callback_returns_app_session_only_to_expected_origin(self):
+        origin='https://playgo-ai-trading.vercel.app'
+        with patch.dict(os.environ,{'CORS_ORIGINS':origin}):
+            start=self.client.get('/api/deriv/oauth/signin',params={'origin':origin})
+        state=parse_qs(urlsplit(start.headers['location']).query)['state'][0]
+        result=unittest.mock.Mock();result.json.return_value={'access_token':'deriv-provider-private-token','expires_in':3600,'token_type':'Bearer'}
+        client=AsyncMock();client.post.return_value=result
+        app_token='deriv_'+('a'*64)
+        with patch('app.deriv_signin.create_session',return_value=app_token) as create,patch.object(postgres_api,'owner') as owner,patch.object(oauth.httpx,'AsyncClient') as cls:
+            cls.return_value.__aenter__.return_value=client
+            response=self.client.get('/api/deriv/oauth/callback',params={'code':'code','state':state})
+        self.assertEqual(response.status_code,200);owner.assert_not_called();create.assert_called_once()
+        self.assertIn('window.opener.postMessage',response.text);self.assertIn(origin,response.text)
+        self.assertIn(app_token,response.text);self.assertNotIn('deriv-provider-private-token',response.text)
+        self.assertIn("script-src 'nonce-",response.headers['Content-Security-Policy'])
+        self.assertIsNone(self.client.cookies.get(oauth.FLOW_COOKIE))

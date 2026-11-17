@@ -65,11 +65,36 @@ async def start(request: Request):
     verifier = secrets.token_urlsafe(48)
     state = secrets.token_urlsafe(32)
     flow = {'state': state, 'verifier': verifier, 'owner_session': session['access_token'], 'redirect_uri': redirect_uri, 'client_id': client_id}
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
-    params = {'response_type': 'code', 'client_id': client_id, 'redirect_uri': redirect_uri,
-              'scope': 'trade', 'state': state, 'code_challenge': challenge, 'code_challenge_method': 'S256'}
+    return authorize(flow)
+
+
+def authorize(flow):
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(flow['verifier'].encode()).digest()).rstrip(b'=').decode()
+    params = {'response_type': 'code', 'client_id': flow['client_id'], 'redirect_uri': flow['redirect_uri'],
+              'scope': 'trade', 'state': flow['state'], 'code_challenge': challenge, 'code_challenge_method': 'S256'}
     response = RedirectResponse('https://auth.deriv.com/oauth2/auth?' + urlencode(params), status_code=303, headers=HEADERS)
     response.set_cookie(FLOW_COOKIE, cipher().encrypt(json.dumps(flow).encode()).decode(), max_age=600, secure=True, httponly=True, samesite='lax', path='/')
+    return response
+
+
+@router.get('/api/deriv/oauth/signin')
+def signin(origin: str = 'https://playgo-ai-trading.vercel.app'):
+    client_id, redirect_uri = config()
+    allowed = {value.strip() for value in os.getenv('CORS_ORIGINS', 'https://playgo-ai-trading.vercel.app').split(',')}
+    if origin not in allowed:
+        raise HTTPException(400, 'Unsupported PlayGo origin')
+    return authorize({'mode': 'signin', 'frontend_origin': origin, 'client_id': client_id,
+                      'redirect_uri': redirect_uri, 'state': secrets.token_urlsafe(32),
+                      'verifier': secrets.token_urlsafe(48)})
+
+
+def signin_complete(token, origin):
+    nonce = secrets.token_urlsafe(24)
+    payload = json.dumps({'type': 'playgo-deriv-signin', 'session_token': token}).replace('<', '\u003c')
+    target = json.dumps(origin).replace('<', '\u003c')
+    response = page('Signed in with Deriv', '<p>Returning to PlayGo. If this window stays open, return to PlayGo and start sign-in again.</p>'
+                    + '<script nonce="' + nonce + '">if(window.opener){window.opener.postMessage(' + payload + ',' + target + ');window.close();}</script>')
+    response.headers['Content-Security-Policy'] = HEADERS['Content-Security-Policy'] + "; script-src 'nonce-" + nonce + "'"
     return response
 
 
@@ -84,7 +109,7 @@ async def callback(request: Request):
         returned_state = request.query_params.get('state', '')
         if not returned_state or not secrets.compare_digest(returned_state, flow['state']):
             raise ValueError('state')
-        owner_id = owner('Bearer ' + flow['owner_session'])
+        owner_id = None if flow.get('mode') == 'signin' else owner('Bearer ' + flow['owner_session'])
         client_id, redirect_uri = config()
         if flow['client_id'] != client_id or flow['redirect_uri'] != redirect_uri:
             raise ValueError('configuration changed')
@@ -107,10 +132,14 @@ async def callback(request: Request):
                 raise ValueError('invalid token response')
             lifetime = min(expiry, 8*60*60)
             connection = {'access_token': access_token, 'owner_id': owner_id, 'expires_at': int(time.time())+lifetime, 'client_id': client_id}
-            from app.deriv_accounts import save_connection
-            save_connection(owner_id, connection)
-            response = page('Deriv connected', '<p>Your authorization was received securely. The encrypted connection lasts up to eight hours in this browser.</p><p>Live trading and money transfers remain disabled. Your real Options account balances are now available in the dashboard. PlayGo reads balances only and does not place trades or transfer funds. <a href="https://playgo-ai-trading.vercel.app/">Return to your dashboard</a>.</p>')
-            response.set_cookie(CONNECTION_COOKIE, cipher().encrypt(json.dumps(connection).encode()).decode(), max_age=lifetime, secure=True, httponly=True, samesite='lax', path='/api/deriv')
+            if flow.get('mode') == 'signin':
+                from app.deriv_signin import create_session
+                response = signin_complete(create_session(connection), flow['frontend_origin'])
+            else:
+                from app.deriv_accounts import save_connection
+                save_connection(owner_id, connection)
+                response = page('Deriv connected', '<p>Your authorization was received securely. Your demo and real Options account balances are available in PlayGo.</p><p>Live trading and transfers remain disabled. <a href="https://playgo-ai-trading.vercel.app/">Return to PlayGo</a>.</p>')
+                response.set_cookie(CONNECTION_COOKIE, cipher().encrypt(json.dumps(connection).encode()).decode(), max_age=lifetime, secure=True, httponly=True, samesite='lax', path='/api/deriv')
         except (httpx.HTTPError, psycopg.Error, OSError, RuntimeError, ValueError, KeyError, TypeError):
             response = page('Connection unsuccessful', '<p>Deriv could not complete authorization. Check the registered client ID and exact redirect URL, then <a href="/deriv/connect">try again</a>.</p>', 502)
     response.delete_cookie(FLOW_COOKIE, secure=True, httponly=True, samesite='lax', path='/')

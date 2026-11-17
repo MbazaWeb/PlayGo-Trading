@@ -55,3 +55,45 @@ def revoke_session(authorization):
         with conn.transaction():
             with conn.cursor() as cur:
                 cur.execute('delete from playgo_private.documents where collection_name=%s and document_id=%s',(COLLECTION,digest))
+
+HANDOFF_COLLECTION='deriv_signin_handoffs'
+
+
+def create_handoff(handoff_id, challenge, origin, session_token):
+    from app.postgres_api import connect
+    from app.deriv_oauth import cipher
+    digest=hashlib.sha256(handoff_id.encode()).hexdigest()
+    value={'challenge':challenge,'origin':origin,'session_token':session_token,'expires_at':int(time.time())+120}
+    encrypted=cipher().encrypt(json.dumps(value).encode()).decode()
+    with connect() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute('''insert into playgo_private.documents (collection_name,document_id,body,revision)
+                    values (%s,%s,%s::jsonb,0)''',(HANDOFF_COLLECTION,digest,json.dumps({'encrypted_handoff':encrypted})))
+
+
+def consume_handoff(handoff_id, verifier, origin):
+    import base64
+    from app.postgres_api import connect
+    from app.deriv_oauth import cipher
+    digest=hashlib.sha256(handoff_id.encode()).hexdigest()
+    challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
+    with connect() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute('select body from playgo_private.documents where collection_name=%s and document_id=%s for update',(HANDOFF_COLLECTION,digest))
+                row=cur.fetchone()
+                if row is None:
+                    return None
+                try:
+                    body=row[0] if isinstance(row[0],dict) else json.loads(row[0])
+                    data=json.loads(cipher().decrypt(body['encrypted_handoff'].encode(),ttl=120))
+                    if data['expires_at']<=time.time():raise ValueError('expired')
+                    if not secrets.compare_digest(challenge,data['challenge']) or data['origin']!=origin:
+                        raise ValueError('wrong browser')
+                    token=data['session_token']
+                    if not TOKEN.fullmatch(token):raise ValueError('invalid session')
+                except (InvalidToken,KeyError,ValueError,TypeError):
+                    raise HTTPException(400,'Sign-in return is invalid or expired. Please sign in again.') from None
+                cur.execute('delete from playgo_private.documents where collection_name=%s and document_id=%s',(HANDOFF_COLLECTION,digest))
+    return token

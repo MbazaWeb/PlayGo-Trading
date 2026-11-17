@@ -41,11 +41,13 @@ only through its separate view and retains its previous balance and positions.
 ## Sign in with Deriv and demo/real selection
 
 PlayGo now offers Sign in with Deriv without owner credentials. The button opens
-`/api/deriv/oauth/signin` in a popup. PKCE/state protect the Deriv redirect; the
-callback delivers only a separate PlayGo Deriv-session token with postMessage to
-the exact allowlisted frontend origin. The frontend verifies the origin and popup
-window. No credentials or tokens appear in a URL. Deriv tokens remain encrypted
-server-side; the separate app bearer token is hashed for database lookup.
+`/api/deriv/oauth/signin` in a popup. PKCE/state protect the Deriv redirect. The
+frontend polls a one-time backend handoff bound to a browser-generated verifier,
+so completing sign-in does not depend on the popup retaining its opener. The
+callback saves only a separate PlayGo Deriv-session token server-side; the popup
+closes after authorization. No credentials or tokens appear in a URL. Deriv
+tokens remain encrypted server-side; the separate app bearer token is hashed for
+database lookup.
 
 These sessions may only read Deriv balances and revoke themselves. They cannot
 authenticate as an owner or access the shared paper account. Owner sign-in remains

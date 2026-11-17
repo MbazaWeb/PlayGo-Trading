@@ -102,3 +102,38 @@ class OAuthTests(unittest.TestCase):
         self.assertIn(app_token,response.text);self.assertNotIn('deriv-provider-private-token',response.text)
         self.assertIn("script-src 'nonce-",response.headers['Content-Security-Policy'])
         self.assertIsNone(self.client.cookies.get(oauth.FLOW_COOKIE))
+
+    def test_popup_callback_saves_handoff_without_needing_opener(self):
+        origin='https://playgo-ai-trading.vercel.app'
+        handoff_id='h'*43
+        challenge='c'*43
+        with patch.dict(os.environ,{'CORS_ORIGINS':origin}):
+            start=self.client.get('/api/deriv/oauth/signin',params={'origin':origin,'handoff_id':handoff_id,'handoff_challenge':challenge})
+        state=parse_qs(urlsplit(start.headers['location']).query)['state'][0]
+        result=unittest.mock.Mock();result.json.return_value={'access_token':'provider-secret','expires_in':3600,'token_type':'Bearer'}
+        client=AsyncMock();client.post.return_value=result
+        app_token='deriv_'+('a'*64)
+        with patch('app.deriv_signin.create_session',return_value=app_token),patch('app.deriv_signin.create_handoff') as save_handoff,patch.object(postgres_api,'owner') as owner,patch.object(oauth.httpx,'AsyncClient') as cls:
+            cls.return_value.__aenter__.return_value=client
+            response=self.client.get('/api/deriv/oauth/callback',params={'code':'code','state':state})
+        self.assertEqual(response.status_code,200);owner.assert_not_called()
+        save_handoff.assert_called_once_with(handoff_id,challenge,origin,app_token)
+        self.assertIn('window.close()',response.text)
+        self.assertNotIn(app_token,response.text)
+        self.assertNotIn('window.opener',response.text)
+        self.assertIsNone(self.client.cookies.get(oauth.FLOW_COOKIE))
+
+    def test_handoff_poll_returns_pending_until_callback_is_saved(self):
+        origin='https://playgo-ai-trading.vercel.app'
+        payload={'handoff_id':'h'*43,'verifier':'v'*43}
+        with patch.dict(os.environ,{'CORS_ORIGINS':origin}),patch('app.deriv_signin.consume_handoff',return_value=None):
+            pending=self.client.post('/api/deriv/oauth/complete',json=payload,headers={'origin':origin})
+        self.assertEqual(pending.status_code,202)
+        self.assertEqual(pending.json(),{'pending':True})
+        self.assertEqual(pending.headers['cache-control'],'no-store')
+        app_token='deriv_'+('a'*64)
+        with patch.dict(os.environ,{'CORS_ORIGINS':origin}),patch('app.deriv_signin.consume_handoff',return_value=app_token):
+            complete=self.client.post('/api/deriv/oauth/complete',json=payload,headers={'origin':origin})
+        self.assertEqual(complete.status_code,200)
+        self.assertEqual(complete.json(),{'session_token':app_token})
+        self.assertEqual(complete.headers['cache-control'],'no-store')

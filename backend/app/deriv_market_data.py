@@ -6,30 +6,93 @@ authoritative paper-trading state.
 """
 import asyncio
 import json
-import os
+import re
 from decimal import Decimal, InvalidOperation
 
-ALLOWED_SYMBOLS = frozenset({"frxEURUSD", "frxGBPUSD", "frxUSDJPY"})
+FOREX_SYMBOL = re.compile(r"frx[A-Z]{6}\Z")
 ALLOWED_GRANULARITIES = frozenset(
     {60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 14400, 28800, 86400}
 )
 MAX_HISTORY_CANDLES = 1000
-PUBLIC_WS_BASE = "wss://ws.derivws.com/websockets/v3"
+PUBLIC_WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public"
 
 
 class DerivMarketDataError(ValueError):
     pass
 
 
+def _validate_forex_symbol(symbol):
+    if not isinstance(symbol, str) or not FOREX_SYMBOL.fullmatch(symbol):
+        raise DerivMarketDataError("Unsupported Deriv Forex symbol")
+
+
+def active_symbols_request() -> dict:
+    return {"active_symbols": "brief"}
+
+
+def parse_active_forex_symbols(message: dict) -> dict:
+    if not isinstance(message, dict):
+        raise DerivMarketDataError("Invalid Deriv response")
+    if message.get("error"):
+        raise DerivMarketDataError("Deriv rejected the active markets request")
+    if message.get("msg_type") != "active_symbols":
+        raise DerivMarketDataError("Deriv active markets response missing")
+    rows = message.get("active_symbols")
+    if not isinstance(rows, list):
+        raise DerivMarketDataError("Invalid Deriv active markets")
+
+    markets = []
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise DerivMarketDataError("Invalid Deriv market")
+        if str(row.get("market", "")).lower() != "forex":
+            continue
+        symbol = row.get("underlying_symbol")
+        _validate_forex_symbol(symbol)
+        name = row.get("underlying_symbol_name")
+        if not isinstance(name, str) or not name.strip():
+            raise DerivMarketDataError("Invalid Deriv market name")
+        open_value = row.get("exchange_is_open")
+        suspended_value = row.get("is_trading_suspended")
+        if type(open_value) is not int or open_value not in (0, 1):
+            raise DerivMarketDataError("Invalid Deriv market status")
+        if type(suspended_value) is not int or suspended_value not in (0, 1):
+            raise DerivMarketDataError("Invalid Deriv market status")
+        try:
+            pip_size = Decimal(str(row["pip_size"]))
+        except (KeyError, InvalidOperation, TypeError, ValueError):
+            raise DerivMarketDataError("Invalid Deriv market precision") from None
+        if not pip_size.is_finite() or pip_size <= 0:
+            raise DerivMarketDataError("Invalid Deriv market precision")
+        if symbol in seen:
+            raise DerivMarketDataError("Duplicate Deriv Forex symbol")
+        seen.add(symbol)
+        markets.append({
+            "symbol": symbol,
+            "pair": symbol[3:],
+            "display_name": name.strip(),
+            "pip_size": str(pip_size),
+            "exchange_is_open": bool(open_value),
+            "is_trading_suspended": bool(suspended_value),
+        })
+    if not markets:
+        raise DerivMarketDataError("No active Deriv Forex markets were returned")
+    markets.sort(key=lambda item: item["pair"])
+    return {
+        "markets": markets,
+        "source": "DERIV_PUBLIC",
+        "execution": "DISABLED",
+    }
+
+
 def tick_request(symbol: str) -> dict:
-    if symbol not in ALLOWED_SYMBOLS:
-        raise DerivMarketDataError("Unsupported Deriv market symbol")
+    _validate_forex_symbol(symbol)
     return {"ticks": symbol, "subscribe": 0}
 
 
 def candles_request(symbol: str, *, count: int = 500, granularity: int = 300) -> dict:
-    if symbol not in ALLOWED_SYMBOLS:
-        raise DerivMarketDataError("Unsupported Deriv market symbol")
+    _validate_forex_symbol(symbol)
     if type(count) is not int or not 10 <= count <= MAX_HISTORY_CANDLES:
         raise DerivMarketDataError("Candle count must be between 10 and 1000")
     if type(granularity) is not int or granularity not in ALLOWED_GRANULARITIES:
@@ -109,11 +172,8 @@ def parse_candles(message: dict, requested_symbol: str) -> dict:
 
 
 async def fetch_public_tick(symbol: str) -> dict:
-    """Fetch a single public tick; requires configured Deriv App ID."""
+    """Fetch a single public tick over Deriv's unauthenticated public endpoint."""
     request = tick_request(symbol)
-    app_id = os.getenv("DERIV_APP_ID", "")
-    if not app_id.isdecimal() or int(app_id) <= 0:
-        raise DerivMarketDataError("DERIV_APP_ID must be a registered positive App ID")
     try:
         import websockets
         from websockets.exceptions import WebSocketException
@@ -122,12 +182,12 @@ async def fetch_public_tick(symbol: str) -> dict:
     try:
         async with asyncio.timeout(12):
             async with websockets.connect(
-                f"{PUBLIC_WS_BASE}?app_id={app_id}",
+                PUBLIC_WS_URL,
                 open_timeout=8, close_timeout=3, max_size=65536,
             ) as ws:
                 await ws.send(json.dumps(request))
                 return parse_tick(json.loads(await ws.recv()), symbol)
-    except (OSError, TimeoutError, json.JSONDecodeError) as exc:
+    except (OSError, TimeoutError, json.JSONDecodeError, WebSocketException) as exc:
         raise DerivMarketDataError("Deriv public market feed unavailable") from exc
 
 
@@ -139,15 +199,12 @@ async def fetch_public_candles(
 ) -> dict:
     """Fetch read-only historical candles; no trading command is sent."""
     request = candles_request(symbol, count=count, granularity=granularity)
-    app_id = os.getenv("DERIV_APP_ID", "")
-    if not app_id.isdecimal() or int(app_id) <= 0:
-        raise DerivMarketDataError("DERIV_APP_ID must be a registered positive App ID")
     try:
         import websockets
         from websockets.exceptions import WebSocketException
         async with asyncio.timeout(12):
             async with websockets.connect(
-                f"{PUBLIC_WS_BASE}?app_id={app_id}",
+                PUBLIC_WS_URL,
                 open_timeout=8, close_timeout=3, max_size=65536,
             ) as ws:
                 await ws.send(json.dumps(request))
@@ -160,3 +217,25 @@ async def fetch_public_candles(
     ) as exc:
         raise DerivMarketDataError("Deriv historical-data feed unavailable") from exc
     return parse_candles(message, symbol)
+
+
+async def fetch_public_forex_markets() -> dict:
+    """Fetch Deriv's active Forex catalog for the read-only market view."""
+    try:
+        import websockets
+        from websockets.exceptions import WebSocketException
+        async with asyncio.timeout(12):
+            async with websockets.connect(
+                PUBLIC_WS_URL,
+                open_timeout=8, close_timeout=3, max_size=262144,
+            ) as ws:
+                await ws.send(json.dumps(active_symbols_request()))
+                message = json.loads(await ws.recv())
+    except (
+        OSError,
+        TimeoutError,
+        json.JSONDecodeError,
+        WebSocketException,
+    ) as exc:
+        raise DerivMarketDataError("Deriv Forex market catalog unavailable") from exc
+    return parse_active_forex_symbols(message)

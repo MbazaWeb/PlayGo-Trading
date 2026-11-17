@@ -5,8 +5,8 @@ against Deriv public candle history. It does not initialize, write, or settle
 the paper account, and it never sends a trading command.
 
 The endpoint accepts `EURUSD` or `GBPUSD`, a supported candle interval, and
-bounded strategy and cost assumptions. `DERIV_APP_ID` is required to open the
-public WebSocket connection. No account token or PAT is used.
+bounded strategy and cost assumptions. The public WebSocket connection
+requires no App ID or account token.
 
 ## Simulation method
 

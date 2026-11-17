@@ -10,7 +10,7 @@ Production environment variables:
 - `CORS_ORIGINS=https://playgo-ai-trading.vercel.app`
 - `DERIV_OAUTH_REDIRECT_URI=https://playgo-ai-trading-api.vercel.app/api/deriv/oauth/callback`
 - `DERIV_OAUTH_CLIENT_ID`: OAuth2 client identifier from Deriv Registered apps.
-  This is distinct from the legacy numeric public-market-data App ID.
+  OAuth tokens identify the application on authenticated REST requests.
 - `DERIV_OAUTH_ENCRYPTION_KEY`: a persistent Fernet key; server-only secret.
 
 Register the exact redirect URI above in Deriv. Start the flow at
@@ -25,6 +25,20 @@ labelled demo and real accounts, and never substitutes demo money.
 Balances are fetched from Deriv on each request and shown by currency; wallets
 and MT5 balances are not included. Missing balances are unavailable, never zero.
 Provider 401/403 requests reconnection; upstream failures do not expose raw data.
+The account overview discovers all active Deriv Forex symbols, streams live
+quotes, and displays candle history with EMA 9/21 trend lines on both demo and
+real account selections. It uses Deriv's unauthenticated public market WebSocket
+at `wss://api.derivws.com/trading/v1/options/ws/public`; a numeric App ID is not
+required. Public market data is read-only and does not place orders.
+
+`GET /api/deriv/accounts/{account_id}/performance` checks that the account is
+present in the authenticated Deriv account list before opening its account-scoped
+OTP WebSocket. It reports Deriv open-contract P&L, realized P&L from up to the
+100 most recent profit-table transactions, and opposing directional positions
+grouped by underlying. Account figures refresh in the frontend every 30 seconds.
+The realized total may be truncated when Deriv returns 100 transactions.
+Opposing positions are informational only, are not guaranteed to offset losses,
+and never trigger orders. Real-account execution remains disabled.
 
 The Deriv sign-in session also enables the explicitly started demo bot. It is
 restricted server-side to verified USD demo Options accounts and uses a 5-minute

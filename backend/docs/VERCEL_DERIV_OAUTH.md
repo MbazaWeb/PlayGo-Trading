@@ -27,9 +27,13 @@ and MT5 balances are not included. Missing balances are unavailable, never zero.
 Provider 401/403 requests reconnection; upstream failures do not expose raw data.
 The account overview discovers all active Deriv Forex symbols, streams live
 quotes, and displays candle history with EMA 9/21 trend lines on both demo and
-real account selections. It uses Deriv's unauthenticated public market WebSocket
-at `wss://api.derivws.com/trading/v1/options/ws/public`; a numeric App ID is not
-required. Public market data is read-only and does not place orders.
+real account selections, and is visible even before the user signs in. The
+`/api/market/forex` and `/api/market/candles` endpoints use Deriv's
+unauthenticated public market WebSocket at
+`wss://api.derivws.com/trading/v1/options/ws/public`; a numeric App ID and
+account sign-in are not required. Public market data is read-only and does not
+place orders. Account P&L and exposure remain available only after sign-in and
+account selection.
 
 `GET /api/deriv/accounts/{account_id}/performance` checks that the account is
 present in the authenticated Deriv account list before opening its account-scoped

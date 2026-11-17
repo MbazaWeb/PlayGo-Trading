@@ -675,23 +675,9 @@ def paper_risk_assessment_detail(assessment_id: str,
     return result
 
 
-def _authorize_market_access(authorization: str) -> None:
-    if authorization.startswith("Bearer deriv_"):
-        from app.deriv_signin import read_session
-        try:
-            read_session(authorization)
-        except HTTPException:
-            raise
-        except (psycopg.Error, OSError, RuntimeError):
-            raise HTTPException(503, "Market-data authentication is temporarily unavailable.") from None
-        return
-    owner(authorization)
-
-
 @app.get("/api/market/forex")
-async def market_forex(authorization: str = Header(default="")):
-    """Return all active Deriv Forex symbols for the authenticated read-only market view."""
-    _authorize_market_access(authorization)
+async def market_forex():
+    """Return Deriv's public active Forex catalog for the read-only market view."""
     try:
         catalog = await deriv_market_data.fetch_public_forex_markets()
     except deriv_market_data.DerivMarketDataError as exc:
@@ -701,10 +687,9 @@ async def market_forex(authorization: str = Header(default="")):
 
 @app.get("/api/market/candles")
 async def market_candles(pair: str = "EURUSD", granularity: int = 300,
-                         count: int = 80, authorization: str = Header(default="")):
-    """Authenticated read-only market chart, separate from paper execution."""
+                         count: int = 80):
+    """Return public read-only market candles, separate from account execution."""
     symbol = "frx" + pair
-    _authorize_market_access(authorization)
     try:
         deriv_market_data.candles_request(symbol, count=count, granularity=granularity)
     except deriv_market_data.DerivMarketDataError as exc:

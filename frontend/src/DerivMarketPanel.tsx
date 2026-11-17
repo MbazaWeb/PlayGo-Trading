@@ -75,8 +75,8 @@ type Performance = {
 
 type Props = {
   load: (path: string) => Promise<unknown>;
-  accountId: string;
-  accountType: 'demo' | 'real';
+  accountId?: string;
+  accountType?: 'demo' | 'real';
 };
 
 const INTERVALS = [
@@ -293,6 +293,13 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
   }, [pair, interval, load]);
 
   useEffect(() => {
+    if (!accountId) {
+      setPerformance(null);
+      setPerformanceError('');
+      setPerformanceBusy(false);
+      return undefined;
+    }
+    const selectedAccountId = accountId;
     let active = true;
     let inFlight = false;
     const fetchPerformance = async () => {
@@ -301,12 +308,12 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
       setPerformanceBusy(true);
       try {
         const result = await load(
-          `/api/deriv/accounts/${encodeURIComponent(accountId)}/performance`,
+          `/api/deriv/accounts/${encodeURIComponent(selectedAccountId)}/performance`,
         ) as Performance;
         if (
           result.source !== 'DERIV'
           || result.execution !== 'DISABLED'
-          || result.account_id !== accountId
+          || result.account_id !== selectedAccountId
           || !Array.isArray(result.open_positions)
           || !Array.isArray(result.opposing_exposure)
           || !Array.isArray(result.recent_closed)
@@ -492,6 +499,7 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
         </p>
       </section>
 
+      {accountId && (
       <section className="accountPerformance" aria-labelledby="account-performance-heading">
         <div className="accountPerformanceHeading">
           <div>
@@ -578,6 +586,13 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
           Account figures are from Deriv and refresh every 30 seconds. Exposure is a directional comparison, not a hedge or a guarantee against loss. Real-account trading remains disabled.
         </p>
       </section>
+      )}
+      {!accountId && (
+        <section className="accountPerformance accountPerformanceLocked">
+          <h2>Account P&amp;L and hedge exposure</h2>
+          <p>Sign in with Deriv and select an account to view its open positions, profit and loss, and opposing exposure.</p>
+        </section>
+      )}
     </>
   );
 }

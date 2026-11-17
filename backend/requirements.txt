@@ -4,3 +4,5 @@ pydantic>=2,<3
 python-dotenv>=1,<2
 psycopg[binary]>=3.2,<4
 httpx>=0.27,<1  # FastAPI TestClient HTTP contract tests
+cryptography>=44,<47
+websockets>=14,<17

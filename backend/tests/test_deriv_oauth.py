@@ -25,7 +25,8 @@ class OAuthTests(unittest.TestCase):
     def test_entrypoint_has_no_mongo_import(self):
         import subprocess,sys
         code="import sys; import app.index; assert 'app.main' not in sys.modules; assert 'pymongo' not in sys.modules; assert 'app.ledger' not in sys.modules"
-        subprocess.run([sys.executable,'-c',code],check=True)
+        from pathlib import Path
+        subprocess.run([sys.executable,'-c',code],check=True,cwd=Path(__file__).resolve().parents[1])
 
     def test_connection_page(self):
         r=self.client.get('/deriv/connect');self.assertEqual(r.status_code,200)
@@ -35,7 +36,7 @@ class OAuthTests(unittest.TestCase):
         r=self.begin();self.assertEqual(r.status_code,303)
         params=parse_qs(urlsplit(r.headers['location']).query)
         self.assertEqual(params['code_challenge_method'],['S256'])
-        self.assertEqual(params['scope'],['application_read'])
+        self.assertEqual(params['scope'],['trade'])
         self.assertNotIn('owner-session',r.headers['set-cookie'])
         self.assertIn('HttpOnly',r.headers['set-cookie']);self.assertIn('Secure',r.headers['set-cookie'])
 
@@ -57,7 +58,7 @@ class OAuthTests(unittest.TestCase):
         start=self.begin();state=parse_qs(urlsplit(start.headers['location']).query)['state'][0]
         result=unittest.mock.Mock();result.json.return_value={'access_token':'test-private-token','expires_in':3600,'token_type':'Bearer'}
         client=AsyncMock();client.post.return_value=result
-        with patch.object(postgres_api,'owner',return_value='owner-id'),patch.object(oauth.httpx,'AsyncClient') as cls:
+        with patch('app.deriv_accounts.save_connection') as save,patch.object(postgres_api,'owner',return_value='owner-id'),patch.object(oauth.httpx,'AsyncClient') as cls:
             cls.return_value.__aenter__.return_value=client
             r=self.client.get('/api/deriv/oauth/callback',params={'code':'test-code','state':state})
         self.assertEqual(r.status_code,200);self.assertIn('Deriv connected',r.text)
@@ -66,6 +67,7 @@ class OAuthTests(unittest.TestCase):
         token_cookie=self.client.cookies.get(oauth.CONNECTION_COOKIE)
         data=json.loads(oauth.cipher().decrypt(token_cookie.encode()))
         self.assertEqual(data['owner_id'],'owner-id')
+        save.assert_called_once()
         self.assertIsNone(self.client.cookies.get(oauth.FLOW_COOKIE))
 
     def test_expired_flow_rejected(self):

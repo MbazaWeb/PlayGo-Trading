@@ -1,6 +1,7 @@
 import React, {useCallback,useEffect,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import './style.css';
+import AccountWorkspace from './AccountWorkspace';
 
 const API=(import.meta.env.VITE_API_URL||'').trim().replace(/\/$/,'') ||
   (['localhost','127.0.0.1'].includes(location.hostname)?'http://127.0.0.1:8001':'');
@@ -151,4 +152,4 @@ function App(){
  <section className="panel"><div className="panelTitle"><h3>Recent state events</h3></div>{state.logs.length===0?<p className="empty">No events yet</p>:state.logs.slice(0,15).map(l=><div className="simpleItem" key={l.id}><div><b>{l.agent}</b><small>{l.message}</small></div><small>{l.time}</small></div>)}</section>
  </>}</div>}<footer>PlayGo Tanzania · Paper only · No live brokerage connection</footer></main>
 }
-createRoot(document.getElementById('root')!).render(<App/>);
+createRoot(document.getElementById('root')!).render(<AccountWorkspace paper={<App/>}/>);

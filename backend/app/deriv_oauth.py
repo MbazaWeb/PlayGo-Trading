@@ -8,6 +8,7 @@ import time
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
+import psycopg
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -43,7 +44,7 @@ def page(title, message, status=200):
 
 @router.get('/deriv/connect', response_class=HTMLResponse)
 def connect_page():
-    return page('Connect Deriv', '<p>Sign in with your PlayGo owner credentials to start the Deriv connection. Deriv will ask you to sign in and consent on its own website.</p><form method="post" action="/api/deriv/oauth/start"><label>PlayGo username<input name="username" required autocomplete="username"></label><label>PlayGo password<input name="password" type="password" required autocomplete="current-password"></label><button>Continue to Deriv</button></form><small>This connection does not enable live trading or transfer funds.</small>')
+    return page('Connect Deriv', '<p>Sign in with your PlayGo owner credentials to start the Deriv connection. Deriv will ask you to sign in and consent on its own website.</p><form method="post" action="/api/deriv/oauth/start"><label>PlayGo username<input name="username" required autocomplete="username"></label><label>PlayGo password<input name="password" type="password" required autocomplete="current-password"></label><button>Continue to Deriv</button></form><small>Deriv requires the trade permission to read Options account balances. PlayGo only reads account data and does not place trades or transfer funds.</small>')
 
 
 @router.post('/api/deriv/oauth/start')
@@ -66,7 +67,7 @@ async def start(request: Request):
     flow = {'state': state, 'verifier': verifier, 'owner_session': session['access_token'], 'redirect_uri': redirect_uri, 'client_id': client_id}
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
     params = {'response_type': 'code', 'client_id': client_id, 'redirect_uri': redirect_uri,
-              'scope': 'application_read', 'state': state, 'code_challenge': challenge, 'code_challenge_method': 'S256'}
+              'scope': 'trade', 'state': state, 'code_challenge': challenge, 'code_challenge_method': 'S256'}
     response = RedirectResponse('https://auth.deriv.com/oauth2/auth?' + urlencode(params), status_code=303, headers=HEADERS)
     response.set_cookie(FLOW_COOKIE, cipher().encrypt(json.dumps(flow).encode()).decode(), max_age=600, secure=True, httponly=True, samesite='lax', path='/')
     return response
@@ -105,10 +106,12 @@ async def callback(request: Request):
             if not isinstance(access_token, str) or not access_token or len(access_token)>2048 or type(expiry) is not int or expiry <= 0 or token.get('token_type','').lower() != 'bearer':
                 raise ValueError('invalid token response')
             lifetime = min(expiry, 8*60*60)
-            connection = {'access_token': access_token, 'owner_id': owner_id, 'expires_at': int(time.time())+lifetime}
-            response = page('Deriv connected', '<p>Your authorization was received securely. The encrypted connection lasts up to eight hours in this browser.</p><p>Live trading and money transfers remain disabled. This initial connection requests application-read access only; it does not connect your real orders or balance.</p>')
+            connection = {'access_token': access_token, 'owner_id': owner_id, 'expires_at': int(time.time())+lifetime, 'client_id': client_id}
+            from app.deriv_accounts import save_connection
+            save_connection(owner_id, connection)
+            response = page('Deriv connected', '<p>Your authorization was received securely. The encrypted connection lasts up to eight hours in this browser.</p><p>Live trading and money transfers remain disabled. Your real Options account balances are now available in the dashboard. PlayGo reads balances only and does not place trades or transfer funds. <a href="https://playgo-ai-trading.vercel.app/">Return to your dashboard</a>.</p>')
             response.set_cookie(CONNECTION_COOKIE, cipher().encrypt(json.dumps(connection).encode()).decode(), max_age=lifetime, secure=True, httponly=True, samesite='lax', path='/api/deriv')
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        except (httpx.HTTPError, psycopg.Error, OSError, RuntimeError, ValueError, KeyError, TypeError):
             response = page('Connection unsuccessful', '<p>Deriv could not complete authorization. Check the registered client ID and exact redirect URL, then <a href="/deriv/connect">try again</a>.</p>', 502)
     response.delete_cookie(FLOW_COOKIE, secure=True, httponly=True, samesite='lax', path='/')
     return response

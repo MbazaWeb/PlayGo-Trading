@@ -2,7 +2,10 @@
 from app.postgres_api import app
 from app.deriv_oauth import router, page
 
+from app.deriv_accounts import router as accounts_router
+
 app.include_router(router)
+app.include_router(accounts_router)
 
 
 @app.get('/', include_in_schema=False)

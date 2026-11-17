@@ -18,9 +18,15 @@ Register the exact redirect URI above in Deriv. Start the flow at
 PlayGo owner, then authorize on Deriv. PKCE, a 10-minute state cookie, owner
 session validation, and HTTPS-only HttpOnly encrypted cookies protect the flow.
 The token exchange runs only on the backend. Tokens are not returned to JavaScript
-or stored in plaintext. The browser connection expires after at most eight hours.
-No payment or trading scope is requested: this initial callback only requests
-`application_read`. It does not enable live execution or expose real balances/orders.
+or stored in plaintext. The connection expires after at most eight hours. An encrypted copy is stored in the existing private documents table, keyed by the authenticated PlayGo owner; no new database schema is required.
+Deriv requires the `trade` OAuth scope even for GET /trading/v1/options/accounts.
+The callback requests that scope, and the application exposes only read-only balance
+retrieval. No trading or payment commands are implemented. Reconnect after this
+update to grant balance access. GET /api/deriv/accounts requires the PlayGo owner
+bearer session, returns only account_type=real, and never substitutes demo money.
+Balances are fetched from Deriv on each request and shown by currency; wallets
+and MT5 balances are not included. Missing balances are unavailable, never zero.
+Provider 401/403 requests reconnection; upstream failures do not expose raw data.
 
 Check `/`, `/api/health`, and `/api/ready` after deployment. A direct callback visit
 without starting OAuth should return a readable HTTP 400, never a runtime crash.
@@ -28,3 +34,6 @@ Do not log OAuth authorization codes, callback query strings, or tokens. Platfor
 request logs may retain callback URLs; restrict their access and retention.
 
 Tests: `python -m unittest tests.test_deriv_oauth -v` from `backend/`.
+
+The frontend defaults to the real-account view. The paper simulator is available
+only through its separate view and retains its previous balance and positions.

@@ -4,6 +4,8 @@
 against Deriv public candle history. It does not initialize, write, or settle
 the paper account, and it never sends a trading command.
 
+Keep research runs separate from Deriv demo execution. The dashboard's demo bot uses an EMA 9/21 crossover strategy, while this endpoint simulates a breakout strategy. Dashboard P&L comes from Deriv contracts. See the [dashboard overview](../../README.md) for those flows.
+
 The endpoint accepts `EURUSD` or `GBPUSD`, a supported candle interval, and
 bounded strategy and cost assumptions. The public WebSocket connection
 requires no App ID or account token.

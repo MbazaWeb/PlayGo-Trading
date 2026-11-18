@@ -1,6 +1,6 @@
 # PlayGo PostgreSQL API — container deployment preparation
 
-This prepares a **paper-only** FastAPI container. It does not deploy, create a database, configure DNS, or approve production.
+This guide covers the standalone paper API container. The hosted Deriv dashboard and its demo bot use the separate [Vercel API entry point](VERCEL_DERIV_OAUTH.md). Build the container locally first, then provision its database, durable storage, and network settings on the target host.
 
 ## Architecture
 - Deploy `backend/Dockerfile.paper` using **backend/** as Docker build context.

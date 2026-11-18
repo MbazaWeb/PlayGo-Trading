@@ -1,4 +1,4 @@
-﻿import { DASHBOARD_PATHS, DashboardPage } from '../types/trading';
+import { DASHBOARD_PATHS, DashboardPage } from '../types/trading';
 
 const configuredApi = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
 export const API =
@@ -26,6 +26,8 @@ export function getPageFromPath(pathname = window.location.pathname): DashboardP
       return 'trade-bot';
     case DASHBOARD_PATHS['pnl-hedge']:
       return 'pnl-hedge';
+    case DASHBOARD_PATHS.agents:
+      return 'agents';
     default:
       return 'account';
   }

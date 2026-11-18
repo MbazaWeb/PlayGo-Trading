@@ -1,0 +1,48 @@
+﻿.agentsPage{display:grid;gap:14px;padding:16px;color:#edf3ff}
+.agentsBanner{display:grid;gap:4px;padding:12px 14px;border:1px solid #5b3a3a;border-radius:10px;background:#2a1a1f;font-size:12px;color:#d9c3c8}
+.agentsBanner strong{color:#ffb4b4;font-size:13px}
+.agentsPanel{padding:14px;border:1px solid #293749;border-radius:10px;background:#111c2a}
+.agentsPanel h2{margin:0 0 10px;font-size:14px;display:flex;gap:10px;align-items:baseline}
+.agentsPanel h2 small{color:#a8bdd3;font-weight:500;font-size:11px}
+.agentsHint{margin:8px 0 0;font-size:11px;color:#8da3ba}
+.agentsError{color:#ffb4b4;font-size:12px}
+.agentsFlow{display:flex;align-items:center;gap:0;overflow-x:auto;padding:6px 2px}
+.agentNode{flex:0 0 auto;display:flex;align-items:center;gap:7px;padding:8px 11px;border:1px solid #293749;border-radius:8px;background:#192737;font-size:11px;font-weight:600;white-space:nowrap;transition:border-color .3s,box-shadow .3s}
+.agentNodeActive{border-color:#4aa3ff;box-shadow:0 0 0 3px rgba(74,163,255,.18)}
+.agentDot{width:8px;height:8px;border-radius:50%;background:#58708a}
+.agentDotRun{background:#3ddc97;animation:agentPulse 1.4s ease-in-out infinite}
+.agentLink{flex:0 0 28px;height:2px;background:#293749;position:relative;overflow:hidden}
+.agentLinkRun::after{content:"";position:absolute;inset:0;width:10px;background:#4aa3ff;animation:agentFlow 1.4s linear infinite}
+.agentsGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.agentCard{padding:12px;border:1px solid #293749;border-radius:10px;background:#111c2a;display:grid;gap:8px}
+.agentCard header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.agentCard h3{margin:0;font-size:13px}
+.agentCard p{margin:0;font-size:11px;color:#a8bdd3;line-height:1.45}
+.agentMetric{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;word-break:break-word}
+.agentBadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px}
+.agentBadge-live{background:#12382a;color:#6fe3b0}
+.agentBadge-partial{background:#3a3016;color:#f0cf74}
+.agentBar{height:6px;border-radius:99px;background:#1c2a3b;overflow:hidden}
+.agentBar.big{height:9px;margin-bottom:10px}
+.agentBar i{display:block;height:100%;background:linear-gradient(90deg,#4aa3ff,#3ddc97);transition:width .6s ease}
+.agentsPayout{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;margin-bottom:8px}
+.agentsPayout input{width:70px;padding:5px 7px;border-radius:6px;border:1px solid #293749;background:#0d1621;color:#edf3ff}
+.agentsPayout span{color:#a8bdd3;font-size:11px}
+.agentGates,.agentFeed{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.agentGates li{display:grid;gap:2px;padding:8px 10px;border-radius:8px;background:#0d1621;font-size:12px;border-left:3px solid #8a3b3b}
+.agentGates li.gateOk{border-left-color:#3ddc97}
+.agentGates small{color:#8da3ba;font-size:11px}
+.agentGates b{display:inline-block;width:14px}
+.agentFeedItem{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;background:#0d1621;font-size:12px;animation:agentIn .45s ease-out}
+.agentSide{font-weight:700;font-size:11px;padding:2px 7px;border-radius:6px}
+.agentSide.up{background:#12382a;color:#6fe3b0}.agentSide.down{background:#3a1a22;color:#ff9aa9}
+.agentStatus{color:#f0cf74}.agentFeedItem time{margin-left:auto;color:#8da3ba;font-size:11px}
+@keyframes agentPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(1.35)}}
+@keyframes agentFlow{from{transform:translateX(-12px)}to{transform:translateX(30px)}}
+@keyframes agentIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.agentDotRun,.agentLinkRun::after,.agentFeedItem{animation:none}}
+
+.agentCopy{padding:7px 12px;border-radius:8px;border:1px solid #2f6db3;background:#16365a;color:#edf3ff;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:8px}
+.agentCopy:hover{background:#1d4678}
+.agentsPanel details summary{cursor:pointer;font-size:12px;color:#a8bdd3}
+.agentPrompt{margin:8px 0 0;padding:10px;max-height:360px;overflow:auto;white-space:pre-wrap;border-radius:8px;background:#0d1621;color:#c9d8ea;font-size:11px;line-height:1.5}

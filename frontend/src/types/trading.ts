@@ -1,10 +1,11 @@
-﻿export type DashboardPage = 'account' | 'market' | 'trade-bot' | 'pnl-hedge';
+export type DashboardPage = 'account' | 'market' | 'trade-bot' | 'pnl-hedge' | 'agents';
 
 export const DASHBOARD_PATHS: Record<DashboardPage, string> = {
   account: '/account',
   market: '/market',
   'trade-bot': '/trade-bot',
   'pnl-hedge': '/pnl-hedge',
+  agents: '/agents',
 };
 
 export const PAGE_TITLES: Record<DashboardPage, string> = {
@@ -12,6 +13,7 @@ export const PAGE_TITLES: Record<DashboardPage, string> = {
   market: 'Market',
   'trade-bot': 'Trade Bot',
   'pnl-hedge': 'Profit, loss & hedge exposure',
+  agents: 'Agents',
 };
 
 export type Account = {

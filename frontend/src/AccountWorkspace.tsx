@@ -18,6 +18,7 @@ import AccountPage from './pages/deriv/AccountPage';
 import MarketPage from './pages/deriv/MarketPage';
 import TradeBotPage from './pages/deriv/TradeBotPage';
 import PnlHedgePage from './pages/deriv/PnlHedgePage';
+import AgentsPage from './pages/deriv/AgentsPage';
 import DerivMarketPanel from './DerivMarketPanel';
 
 const NOTIF_STORAGE_KEY = 'playgo_notification_logs';
@@ -259,7 +260,7 @@ export default function AccountWorkspace() {
 
   useEffect(() => {
     const accountId = selected?.account_id;
-    if (!token || !data?.connected || !accountId || dashboardPage === 'pnl-hedge' ||
+    if (!token || !data?.connected || !accountId || dashboardPage === 'pnl-hedge' || dashboardPage === 'agents' ||
         (dashboardPage === 'trade-bot' && derivSession && selected?.account_type === 'demo')) return;
     let inFlight = false;
     const poll = async () => {
@@ -645,7 +646,7 @@ export default function AccountWorkspace() {
         <Navbar currentPage={dashboardPage} onNavigate={showDashboardPage} />
       </header>
 
-      {(dashboardPage === 'trade-bot' || dashboardPage === 'pnl-hedge') && data?.connected && selected && (
+      {(dashboardPage === 'trade-bot' || dashboardPage === 'pnl-hedge' || dashboardPage === 'agents') && data?.connected && selected && (
         <div className="accountMarketControls dashboardAccountControl">
           <label>
             Deriv account
@@ -710,6 +711,16 @@ export default function AccountWorkspace() {
       )}
 
       {dashboardPage === 'pnl-hedge' && <PnlHedgePage load={loadMarkets} data={data} selected={selected} />}
+
+      {dashboardPage === 'agents' && (
+        <AgentsPage
+          key={selected?.account_id}
+          load={loadMarkets}
+          data={data}
+          selected={selected}
+          botState={botState?.account_id === selected?.account_id ? botState : null}
+        />
+      )}
 
       <footer>
         <span>PlayGo / Deriv account overview</span>

@@ -6,7 +6,7 @@ type NavbarProps = {
   onNavigate: (page: DashboardPage) => void;
 };
 
-const NAV_ITEMS: DashboardPage[] = ['account', 'market', 'trade-bot', 'pnl-hedge'];
+const NAV_ITEMS: DashboardPage[] = ['account', 'market', 'trade-bot', 'pnl-hedge', 'agents'];
 
 export default function Navbar({ currentPage, onNavigate }: NavbarProps) {
   function handleClick(e: React.MouseEvent<HTMLAnchorElement>, page: DashboardPage) {

@@ -1,6 +1,12 @@
 # PlayGo AI Trading — development phases
 
-All phases remain **paper trading only**. Do not interpret sampled synthetic quotes as market evidence or claim strategy profitability.
+## Current dashboard and API
+
+- The Vercel dashboard offers Account, Market, Trade Bot, and Profit, loss & hedge exposure pages. The public Forex catalog supports market-status filters and chart intervals. Deriv sign-in supplies account balances, portfolio data, and closed results for the selected Options account.
+- The Deriv demo bot submits Rise/Fall contracts on verified USD demo accounts using virtual funds. It supports configured market, duration, stake, and daily cap. Trade events persist server-side, and the dashboard reconciles confirmed bot contracts against Deriv.
+- The notification bell checks for settlements, Forex status changes, and bot alerts while the dashboard is open. Real-account use is read-only. Unattended cloud execution and Digits contracts remain pending.
+
+The milestones below describe the historical paper-engine work. Their status labels describe the state at the time each entry was written. See the [README](README.md) for the current setup and [Vercel runbook](backend/docs/VERCEL_DERIV_OAUTH.md) for deployment.
 
 ## Phase 1 — Core virtual account (implemented; unverified)
 - Single MongoDB-backed account, synthetic quotes, virtual orders, positions, basic risk checks.

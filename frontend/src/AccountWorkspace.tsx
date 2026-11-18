@@ -52,14 +52,14 @@ export default function AccountWorkspace() {
   const toastTimerRef = useRef<number | undefined>(undefined);
 
   const pushNotification = useCallback(
-    (category: NotificationCategory, title: string, message: string, amountLabel?: string) => {
+    (category: NotificationCategory, title: string, message: string, amountLabel?: string, time = new Date().toISOString(), toast = true) => {
       const entry: NotificationLog = {
         id: 'notif-' + crypto.randomUUID(),
         category,
         title,
         message,
         amountLabel,
-        time: new Date().toISOString(),
+        time,
         read: false,
       };
       setNotifications((prev) => {
@@ -69,7 +69,7 @@ export default function AccountWorkspace() {
         } catch {}
         return updated;
       });
-      if (category === 'profit' || category === 'loss' || category === 'risk') {
+      if (toast && (category === 'profit' || category === 'loss' || category === 'risk')) {
         setLiveToast(entry);
         window.clearTimeout(toastTimerRef.current);
         toastTimerRef.current = window.setTimeout(() => setLiveToast(null), 6000);
@@ -116,13 +116,12 @@ export default function AccountWorkspace() {
         const body = await res.json();
         if (!active || !Array.isArray(body.markets)) return;
 
-        const isInitial = Object.keys(marketStatusRef.current).length === 0;
-        let openCount = 0;
         for (const m of body.markets) {
+          if (typeof m.symbol !== 'string' || typeof m.display_name !== 'string' ||
+              typeof m.exchange_is_open !== 'boolean' || typeof m.is_trading_suspended !== 'boolean') continue;
           const isOpen = Boolean(m.exchange_is_open && !m.is_trading_suspended);
-          if (isOpen) openCount++;
           const prevOpen = marketStatusRef.current[m.symbol];
-          if (!isInitial && prevOpen !== undefined && prevOpen !== isOpen) {
+          if (prevOpen !== undefined && prevOpen !== isOpen) {
             pushNotification(
               'market',
               isOpen ? `Market Open: ${m.display_name}` : `Market Closed: ${m.display_name}`,
@@ -132,13 +131,6 @@ export default function AccountWorkspace() {
             );
           }
           marketStatusRef.current[m.symbol] = isOpen;
-        }
-        if (isInitial && body.markets.length > 0) {
-          pushNotification(
-            'market',
-            openCount > 0 ? 'Forex Markets Open' : 'Forex Markets Closed',
-            `${openCount} of ${body.markets.length} Forex pairs are currently open for trading.`
-          );
         }
       } catch {
         // silent background check
@@ -153,30 +145,30 @@ export default function AccountWorkspace() {
   }, [token, pushNotification]);
 
   // Track Bot Status Transitions (End / Risk / Error)
-  const prevBotStatusRef = useRef<string | null>(null);
+  const prevBotStatusRef = useRef<{ accountId: string; status: string; nearCap: boolean } | null>(null);
   useEffect(() => {
     if (!botState) return;
-    const prevStatus = prevBotStatusRef.current;
+    const previous = prevBotStatusRef.current?.accountId === botState.account_id ? prevBotStatusRef.current : null;
     const currStatus = botState.status;
 
-    if (prevStatus && prevStatus !== currStatus) {
+    if (previous?.status !== currStatus) {
       if (currStatus === 'needs_review') {
         pushNotification(
           'risk',
           'RISK ALERT: Trade Review Needed',
           'Bot paused because a trade outcome is uncertain. Verify your Deriv account before restarting.'
         );
-      } else if (currStatus === 'daily_limit_reached' || Number(botState.daily_stake) >= Number(botState.daily_stake_limit)) {
+      } else if (currStatus === 'daily_budget_reached') {
         pushNotification(
           'risk',
           'RISK / END: Daily Stake Limit Reached',
           `Bot reached its daily stake cap of USD ${Number(botState.daily_stake_limit).toFixed(2)} and ended execution.`
         );
-      } else if (prevStatus === 'running' && !botState.running) {
+      } else if (currStatus === 'insufficient_balance' || currStatus === 'feed_error') {
         pushNotification(
-          'bot',
-          'Bot Session Ended',
-          `Demo bot on ${botState.symbol} has stopped (${currStatus.replace(/_/g, ' ')}).`
+          'risk',
+          'Demo bot paused',
+          botState.last_error ?? currStatus.replace(/_/g, ' ')
         );
       }
     }
@@ -184,7 +176,8 @@ export default function AccountWorkspace() {
     // Warn when 80% of daily risk budget is used
     const used = Number(botState.daily_stake || 0);
     const limit = Number(botState.daily_stake_limit || 0);
-    if (limit > 0 && used >= limit * 0.8 && used < limit && prevStatus !== 'risk_warned') {
+    const nearCap = limit > 0 && used >= limit * 0.8;
+    if (botState.running && nearCap && !previous?.nearCap) {
       pushNotification(
         'risk',
         'Risk Warning: 80% Daily Cap Used',
@@ -192,7 +185,7 @@ export default function AccountWorkspace() {
       );
     }
 
-    prevBotStatusRef.current = currStatus;
+    prevBotStatusRef.current = { accountId: botState.account_id, status: currStatus, nearCap };
   }, [botState, pushNotification]);
 
   useEffect(() => {
@@ -209,6 +202,44 @@ export default function AccountWorkspace() {
     document.title = `${PAGE_TITLES[dashboardPage]} | PlayGo`;
   }, [dashboardPage]);
 
+  const seenSettlements = useRef(new Map<string, Set<string>>());
+  const publishSettlements = useCallback((body: {
+    source?: string; account_id?: string; currency?: string;
+    recent_closed?: { contract_id: string; symbol: string; profit: string; sell_time?: number | string | null }[];
+  }, accountId: string) => {
+    if (body.source !== 'DERIV' || body.account_id !== accountId ||
+        typeof body.currency !== 'string' || !Array.isArray(body.recent_closed)) return;
+    const key = `playgo_seen_settlements:${accountId}`;
+    let seen = seenSettlements.current.get(accountId);
+    if (!seen) {
+      try {
+        const saved: unknown = JSON.parse(localStorage.getItem(key) ?? '[]');
+        seen = new Set(Array.isArray(saved) ? saved.filter((id) => typeof id === 'string') : []);
+      } catch {
+        seen = new Set();
+      }
+      seenSettlements.current.set(accountId, seen);
+    }
+    const initial = seen.size === 0;
+    for (const row of body.recent_closed.slice(0, 500).reverse()) {
+      if (!row || typeof row.contract_id !== 'string' || !row.contract_id ||
+          typeof row.profit !== 'string' || !row.profit.trim() || seen.has(row.contract_id)) continue;
+      const profit = Number(row.profit);
+      if (!Number.isFinite(profit)) continue;
+      seen.add(row.contract_id);
+      if (profit === 0) continue;
+      const time = row.sell_time;
+      const timestamp = time == null ? NaN : /^\d+$/.test(String(time)) ? Number(time) * 1000 : Date.parse(String(time));
+      const amount = `${profit > 0 ? '+' : '−'}${body.currency} ${Math.abs(profit).toFixed(2)}`;
+      pushNotification(profit > 0 ? 'profit' : 'loss', profit > 0 ? 'Trade profit realized' : 'Trade loss realized',
+        `${row.symbol || 'Deriv contract'} · #${row.contract_id}`, amount,
+        Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined, !initial);
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(Array.from(seen).slice(-1500)));
+    } catch {}
+  }, [pushNotification]);
+
   const loadMarkets = useCallback(
     async (path: string) => {
       const headers: HeadersInit = token ? { Authorization: 'Bearer ' + token } : {};
@@ -217,10 +248,35 @@ export default function AccountWorkspace() {
       if (!response.ok) {
         throw Error(typeof body.detail === 'string' ? body.detail : 'Unable to load Deriv market data.');
       }
+      const accountId = selected?.account_id;
+      if (accountId && path === `/api/deriv/accounts/${encodeURIComponent(accountId)}/performance`) {
+        publishSettlements(body, accountId);
+      }
       return body;
     },
-    [token]
+    [token, selected?.account_id, publishSettlements]
   );
+
+  useEffect(() => {
+    const accountId = selected?.account_id;
+    if (!token || !data?.connected || !accountId || dashboardPage === 'pnl-hedge' ||
+        (dashboardPage === 'trade-bot' && derivSession && selected?.account_type === 'demo')) return;
+    let inFlight = false;
+    const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        await loadMarkets(`/api/deriv/accounts/${encodeURIComponent(accountId)}/performance`);
+      } catch {
+        // Retry on the next poll.
+      } finally {
+        inFlight = false;
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 30_000);
+    return () => window.clearInterval(timer);
+  }, [dashboardPage, data?.connected, derivSession, loadMarkets, selected?.account_id, selected?.account_type, token]);
 
   async function signInWithDeriv() {
     setError('');

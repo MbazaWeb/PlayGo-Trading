@@ -135,8 +135,8 @@ export default function NotificationPanel({ logs, onMarkAllRead, onClearAll }: P
                   <Bell size={26} />
                   <p>No notifications in this category yet.</p>
                   <small>
-                    Profit/Loss results, Market Open/Closed changes, and Bot Start/Stop/Risk alerts will appear here
-                    automatically.
+                    While the dashboard is open, the bell checks for Deriv settlements, Forex market status changes,
+                    and bot activity.
                   </small>
                 </div>
               ) : (

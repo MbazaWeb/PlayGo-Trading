@@ -94,35 +94,11 @@ export default function AccountWorkspace() {
     } catch {}
   }, []);
 
+  const derivSession = token.startsWith('deriv_');
   const selected =
     data?.accounts.find((account) => account.account_id === selectedId) ??
-    data?.accounts.find((account) => account.account_type === 'real') ??
+    data?.accounts.find((account) => account.account_type === (derivSession ? 'demo' : 'real')) ??
     data?.accounts[0];
-  const derivSession = token.startsWith('deriv_');
-
-  // Track Balance Changes -> Log Profit (+$X) or Loss (-$X)
-  const prevBalanceRef = useRef<{ accountId: string; balance: number } | null>(null);
-  useEffect(() => {
-    if (!selected || selected.balance === null) return;
-    const currentBal = Number(selected.balance);
-    if (!Number.isFinite(currentBal)) return;
-
-    const prev = prevBalanceRef.current;
-    if (prev && prev.accountId === selected.account_id && prev.balance !== currentBal) {
-      const diff = Number((currentBal - prev.balance).toFixed(2));
-      if (Math.abs(diff) >= 0.01) {
-        const isProfit = diff > 0;
-        const formattedAmount = `${isProfit ? '+' : '-'}$${Math.abs(diff).toFixed(2)}`;
-        pushNotification(
-          isProfit ? 'profit' : 'loss',
-          isProfit ? 'Trade Profit Realized' : 'Trade Loss Realized',
-          `Account ${selected.account_id} balance ${isProfit ? 'increased' : 'decreased'} to ${selected.currency} ${currentBal.toFixed(2)}.`,
-          formattedAmount
-        );
-      }
-    }
-    prevBalanceRef.current = { accountId: selected.account_id, balance: currentBal };
-  }, [selected?.account_id, selected?.balance, selected?.currency, pushNotification]);
 
   // Track Market Open / Closed Status Changes
   const marketStatusRef = useRef<Record<string, boolean>>({});
@@ -469,7 +445,8 @@ export default function AccountWorkspace() {
   }
 
   useEffect(() => {
-    if (!token || !derivSession || !selected || selected.account_type !== 'demo' || !botState?.running) return;
+    if (!token || !derivSession || !selected || selected.account_type !== 'demo' ||
+        !botState?.running || botState.account_id !== selected.account_id) return;
     const accountId = selected.account_id;
     let active = true;
     let inFlight = false;
@@ -512,7 +489,7 @@ export default function AccountWorkspace() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [token, derivSession, selected?.account_id, selected?.account_type, botState?.running]);
+  }, [token, derivSession, selected?.account_id, selected?.account_type, botState?.running, botState?.account_id]);
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
@@ -611,6 +588,21 @@ export default function AccountWorkspace() {
         <Navbar currentPage={dashboardPage} onNavigate={showDashboardPage} />
       </header>
 
+      {(dashboardPage === 'trade-bot' || dashboardPage === 'pnl-hedge') && data?.connected && selected && (
+        <div className="accountMarketControls dashboardAccountControl">
+          <label>
+            Deriv account
+            <select value={selected.account_id} onChange={(event) => setSelectedId(event.target.value)}>
+              {data.accounts.map((account) => (
+                <option key={account.account_id} value={account.account_id}>
+                  {account.account_type === 'demo' ? 'Demo' : 'Real'} · {account.account_id} · {account.currency}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
       {dashboardPage === 'account' && (
         <AccountPage
           token={token}
@@ -638,7 +630,7 @@ export default function AccountWorkspace() {
         <TradeBotPage
           derivSession={derivSession}
           selected={selected}
-          botState={botState}
+          botState={botState?.account_id === selected?.account_id ? botState : null}
           botBusy={botBusy}
           botError={botError}
           oauthBusy={oauthBusy}
@@ -648,7 +640,7 @@ export default function AccountWorkspace() {
         />
       )}
 
-      {dashboardPage === 'pnl-hedge' && <PnlHedgePage load={loadMarkets} data={data} selected={selected} logs={notifications} />}
+      {dashboardPage === 'pnl-hedge' && <PnlHedgePage load={loadMarkets} data={data} selected={selected} />}
 
       <footer>
         <span>PlayGo / Deriv account overview</span>

@@ -252,6 +252,30 @@ export default function TradeBotPage({
             </small>
           )}
 
+          <section className="accountPerformanceSection" aria-labelledby="trade-activity-heading">
+            <h3 id="trade-activity-heading">Logs &amp; trade activity</h3>
+            <p role="status">{botState?.running ? 'Bot running' : 'Bot paused'}
+              {botState?.last_cycle_at ? ` · Last check ${new Date(botState.last_cycle_at).toLocaleString()}` : ''}
+              {' · '}Deriv demo balance {selected.balance === null ? 'unavailable' : `${selected.currency} ${selected.balance}`}
+            </p>
+            {botState?.trade_activity?.length ? (
+              <div className="accountMarketTableWrap accountRecentActivities">
+                <table className="accountMarketTable">
+                  <thead><tr><th>Event time</th><th>Initiated</th><th>Market</th><th>Direction</th><th>Stake</th><th>Activity</th><th>Contract ID</th></tr></thead>
+                  <tbody>{[...botState.trade_activity].reverse().map((event, index) => (
+                    <tr key={`${event.time}-${index}`}>
+                      <td><time dateTime={event.time}>{new Date(event.time).toLocaleString()}</time></td>
+                      <td><time dateTime={event.initiated_at}>{new Date(event.initiated_at).toLocaleString()}</time></td>
+                      <td>{event.symbol}</td><td>{event.side === 'BUY' ? 'Rise' : 'Fall'}</td>
+                      <td>{selected.currency} {event.stake}</td><td>{event.status}</td>
+                      <td>{event.contract_id ?? '—'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            ) : <p className="accountMarketMessage">No trade events have been recorded for this demo account yet.</p>}
+          </section>
+
           {botState?.last_error && (
             <p className="realError" role="alert">
               {botState.last_error}

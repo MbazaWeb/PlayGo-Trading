@@ -245,14 +245,15 @@ def _performance_response(account, open_contracts, transactions):
     for row in transactions:
         if not isinstance(row, dict):
             raise ValueError('Invalid Deriv transaction')
-        if row.get('sell_time') is None:
+        # A profit-table entry can have settled prices without a sell timestamp.
+        if row.get('sell_price') is None and row.get('sell_time') is None:
             continue
         buy_price = _money(row.get('buy_price'), 'closed contract buy price')
         sell_price = _money(row.get('sell_price'), 'closed contract sell price')
         profit = sell_price - buy_price
         realized_total += profit
         closed.append({
-            'contract_id': str(row.get('contract_id', '')),
+            'contract_id': str(row.get('contract_id') or row.get('transaction_id') or ''),
             'symbol': row.get('underlying') or row.get('symbol') or row.get('underlying_symbol') or 'Unknown',
             'contract_type': row.get('contract_type') if isinstance(row.get('contract_type'), str) else 'UNKNOWN',
             'buy_price': str(buy_price),
@@ -316,6 +317,8 @@ async def account_performance(account_id: str, authorization: str = Header(defau
             )
             portfolio = portfolio_response.get('portfolio')
             contracts = portfolio.get('contracts') if isinstance(portfolio, dict) else None
+            if contracts is None and isinstance(portfolio, dict) and portfolio.get('count') == 0:
+                contracts = []
             if not isinstance(contracts, list) or len(contracts) > 100:
                 raise HTTPException(502, 'Deriv returned invalid open position data.')
             open_contracts = []
@@ -335,7 +338,7 @@ async def account_performance(account_id: str, authorization: str = Header(defau
                     raise HTTPException(502, 'Deriv returned mismatched open position data.')
                 if contract.get('is_sold') in (1, True, '1'):
                     continue
-                open_contracts.append(contract)
+                open_contracts.append({**item, **contract})
 
             profit_response = await _account_ws_request(
                 socket,

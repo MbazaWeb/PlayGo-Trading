@@ -34,6 +34,8 @@ button, select {
 @media(max-width:600px){.accountMarketDirectoryHeading,.accountPerformanceHeading{align-items:flex-start;flex-direction:column}.accountMarketDirectoryHeading label{width:100%;justify-content:space-between}.accountMarketDirectoryHeading input{flex:1;min-width:0}.accountPerformance{padding:16px}.accountMarketSummary{gap:9px}.accountMarketTable th,.accountMarketTable td{padding:9px}.accountPnlCards{grid-template-columns:1fr}}
 .accountPerformanceLocked>h2{margin:0;color:#dbe6f5;font-size:15px}.accountPerformanceLocked>p{margin:8px 0 0;color:#93a5bc;font-size:11px;line-height:1.7}
 .accountRecentActivities{max-height:420px;overflow:auto}
+.dashboardAccountControl{margin-top:16px}
+.accountMarketDirectoryHeading select{min-height:34px;padding:7px 9px;border:1px solid #34485b;border-radius:7px;background:#182636;color:#edf3ff;font:inherit}
 .dashboardSubnav{display:flex;flex:1 0 100%;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:10px 0 0;border-top:1px solid #293749}
 .dashboardSubnav a{flex:0 0 auto;min-height:36px;padding:8px 11px;border-radius:8px;background:transparent;color:#a8bdd3;font-size:11px;font-weight:600;text-decoration:none;white-space:nowrap}
 .dashboardSubnav a:hover,.dashboardSubnav a[aria-current="page"]{background:#192737;color:#edf3ff}

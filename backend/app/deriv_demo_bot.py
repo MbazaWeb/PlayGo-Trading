@@ -255,6 +255,7 @@ def _public_state(state):
         "execution": "DEMO_ONLY",
         "strategy": "EMA_9_21_CROSS",
         **state,
+        "trade_activity": state.get("trade_activity", []),
         "symbol": _state_symbol(state),
         "contract_type": _state_contract_type(state),
         "duration_minutes": _state_duration(state),
@@ -338,7 +339,23 @@ async def _ws_request(socket, request, request_id):
     raise DemoBotProviderError("Deriv did not return the expected demo bot response.")
 
 
-def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL):
+def _record_trade_activity(state, status, contract_id=None):
+    pending = state.get("pending_trade")
+    if not pending or "created_at" not in pending or "side" not in pending:
+        return
+    history = state.setdefault("trade_activity", [])
+    history.append({
+        "time": datetime.now(timezone.utc).isoformat(),
+        "initiated_at": datetime.fromtimestamp(pending["created_at"], timezone.utc).isoformat(),
+        "symbol": _state_symbol(state),
+        "side": pending["side"],
+        "stake": pending.get("stake", str(_state_stake(state))),
+        "status": status,
+        "contract_id": contract_id,
+    })
+
+
+def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL, balance=None):
     with _locked_state(account_id) as state:
         if not state["running"] or _state_symbol(state) != symbol:
             return state, False
@@ -358,6 +375,7 @@ def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL):
                 else:
                     state["status"] = "needs_review"
                     state["last_error"] = "A trade result is uncertain. Check Deriv before restarting."
+                    _record_trade_activity(state, "Purchase unconfirmed")
             return state, False
         if candle_epoch <= state["last_processed_epoch"]:
             return state, False
@@ -382,6 +400,11 @@ def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL):
             return state, False
 
         stake = _state_stake(state)
+        if balance is not None and Decimal(balance) < stake:
+            state["running"] = False
+            state["status"] = "insufficient_balance"
+            state["last_error"] = "The available Deriv demo balance is below the configured stake."
+            return state, False
         daily_limit = _state_daily_limit(state)
         daily_stake = Decimal(state["daily_stake"])
         if daily_stake + stake > daily_limit:
@@ -398,6 +421,7 @@ def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL):
             "stage": "proposal",
         }
         state["last_error"] = None
+        _record_trade_activity(state, "Trade initiated")
         return state, True
 
 
@@ -420,6 +444,7 @@ def _finish_trade(account_id, contract_id):
             "created_at": datetime.fromtimestamp(pending["created_at"], timezone.utc).isoformat(),
             "status": "open",
         }
+        _record_trade_activity(state, "Purchase confirmed", str(contract_id))
         state["pending_trade"] = None
         if state["running"]:
             state["status"] = "contract_open"
@@ -437,7 +462,9 @@ def _fail_trade(account_id, *, uncertain):
             "A trade result is uncertain. Check Deriv before restarting."
             if uncertain else "Deriv rejected the demo proposal. The bot was paused."
         )
-        if not uncertain:
+        if uncertain:
+            _record_trade_activity(state, "Purchase unconfirmed")
+        else:
             _release_proposal_stake(state)
         return state
 
@@ -445,6 +472,7 @@ def _fail_trade(account_id, *, uncertain):
 def _release_proposal_stake(state):
     pending = state.get("pending_trade")
     if pending and pending.get("stage") == "proposal":
+        _record_trade_activity(state, "Proposal closed without purchase")
         reserved_stake = Decimal(str(pending.get("stake", _state_stake(state))))
         state["daily_stake"] = str(max(Decimal("0"), Decimal(state["daily_stake"]) - reserved_stake))
         state["pending_trade"] = None
@@ -455,6 +483,7 @@ def _mark_buy_started(account_id):
         if not state["pending_trade"] or state["pending_trade"].get("stage") != "proposal":
             raise DemoBotProviderError("The demo trade state changed unexpectedly.")
         state["pending_trade"]["stage"] = "buy"
+        _record_trade_activity(state, "Purchase submitted")
 
 
 async def _execute_trade(socket, state, side, account_id):
@@ -549,6 +578,8 @@ async def start_demo_bot(payload: DemoBotStartRequest, authorization: str = Head
 
             if next_stake > next_daily_limit:
                 raise HTTPException(422, "Stake per contract cannot exceed the daily stake cap.")
+            if account.get("balance") is not None and Decimal(account["balance"]) < next_stake:
+                raise HTTPException(409, "The available Deriv demo balance is below the configured stake.")
 
             if Decimal(state["daily_stake"]) + next_stake > next_daily_limit:
                 raise HTTPException(409, "The daily demo stake cap has been reached. Try again after the UTC day resets.")
@@ -635,6 +666,7 @@ async def resolve_demo_bot(payload: DemoBotResolveRequest, authorization: str = 
                     ).isoformat(),
                     "status": "outcome unconfirmed",
                 }
+            _record_trade_activity(state, "Account review confirmed")
             state["pending_trade"] = None
             state["running"] = False
             state["status"] = "stopped"
@@ -664,6 +696,8 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
                     else:
                         state["status"] = "needs_review"
                         state["last_error"] = "A trade result is uncertain. Check Deriv before restarting."
+                        if initial["status"] != "needs_review":
+                            _record_trade_activity(state, "Purchase unconfirmed")
                 return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
             return JSONResponse(_public_state(initial), headers={"Cache-Control": "no-store"})
 
@@ -704,6 +738,7 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
                 candle_epoch=latest["epoch"],
                 now=now,
                 symbol=symbol,
+                balance=account.get("balance"),
             )
             if not reserved:
                 return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})

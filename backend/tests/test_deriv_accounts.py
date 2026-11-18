@@ -197,7 +197,7 @@ class AccountPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 {'contract_id':2,'symbol':'frxEURUSD','contract_type':'PUT','buy_price':'3','profit':'-4','purchase_time':1700000001},
             ],
             [
-                {'contract_id':3,'underlying_symbol':'frxEURUSD','contract_type':'CALL','buy_price':'5','sell_price':'0','sell_time':1700000002},
+                {'transaction_id':3,'underlying_symbol':'frxEURUSD','contract_type':'CALL','buy_price':'5','sell_price':'0'},
                 {'contract_id':4,'underlying_symbol':'frxEURUSD','contract_type':'PUT','buy_price':'3','sell_price':'10','sell_time':1700000003},
                 {'contract_id':5,'symbol':'frxEURUSD','contract_type':'PUT','buy_price':'2','sell_price':None,'sell_time':None},
             ],
@@ -205,6 +205,8 @@ class AccountPerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['unrealized_pnl'],'-2')
         self.assertEqual(result['realized_pnl'],'2')
         self.assertEqual(result['realized_transaction_count'],2)
+        self.assertEqual(result['recent_closed'][0]['contract_id'],'3')
+        self.assertIsNone(result['recent_closed'][0]['sell_time'])
         self.assertEqual([row['symbol'] for row in result['recent_closed']],['frxEURUSD','frxEURUSD'])
         self.assertEqual(result['opposing_exposure'][0]['up_stake'],'5')
         self.assertEqual(result['opposing_exposure'][0]['down_stake'],'3')

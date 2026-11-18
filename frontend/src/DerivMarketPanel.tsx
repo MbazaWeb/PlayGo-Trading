@@ -52,7 +52,7 @@ type ClosedPosition = {
   buy_price: string;
   sell_price: string;
   profit: string;
-  sell_time: number | string;
+  sell_time: number | string | null;
 };
 
 type AccountActivity = {
@@ -87,14 +87,27 @@ type Props = {
   view: 'markets' | 'performance';
   accountId?: string;
   accountType?: 'demo' | 'real';
+  accountBalance?: string | null;
 };
 
 const INTERVALS = [
   { seconds: '60', label: '1 minute' },
+  { seconds: '120', label: '2 minutes' },
+  { seconds: '180', label: '3 minutes' },
   { seconds: '300', label: '5 minutes' },
+  { seconds: '600', label: '10 minutes' },
   { seconds: '900', label: '15 minutes' },
+  { seconds: '1800', label: '30 minutes' },
   { seconds: '3600', label: '1 hour' },
+  { seconds: '7200', label: '2 hours' },
+  { seconds: '14400', label: '4 hours' },
+  { seconds: '28800', label: '8 hours' },
+  { seconds: '86400', label: '1 day' },
 ];
+
+function marketStatus(market: Market) {
+  return market.is_trading_suspended ? 'Suspended' : market.exchange_is_open ? 'Open' : 'Closed';
+}
 
 function ema(values: number[], period: number) {
   if (!values.length) return [];
@@ -133,13 +146,14 @@ function decimalPlaces(pipSize: string) {
   return Math.min(places, 8);
 }
 
-export default function DerivMarketPanel({ load, view, accountId, accountType }: Props) {
+export default function DerivMarketPanel({ load, view, accountId, accountType, accountBalance }: Props) {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [pair, setPair] = useState('');
   const [interval, setInterval] = useState('300');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [ticks, setTicks] = useState<Record<string, Tick>>({});
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('All');
   const [feedState, setFeedState] = useState('Loading market catalog...');
   const [catalogError, setCatalogError] = useState('');
   const [chartError, setChartError] = useState('');
@@ -151,19 +165,17 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
   const selectedMarket = markets.find((market) => market.pair === pair);
   const visibleMarkets = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return needle
-      ? markets.filter((market) =>
-        market.pair.toLowerCase().includes(needle)
-        || market.display_name.toLowerCase().includes(needle))
-      : markets;
-  }, [markets, search]);
+    return markets.filter((market) =>
+      (status === 'All' || marketStatus(market) === status)
+      && (market.pair.toLowerCase().includes(needle) || market.display_name.toLowerCase().includes(needle)));
+  }, [markets, search, status]);
 
   useEffect(() => {
     if (view !== 'markets') return undefined;
     let active = true;
     setCatalogError('');
     setFeedState('Loading market catalog...');
-    void load('/api/market/forex')
+    const refreshCatalog = () => void load('/api/market/forex')
       .then((value) => {
         const result = value as { markets?: Market[] };
         if (
@@ -182,7 +194,9 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
           && typeof market.is_trading_suspended === 'boolean');
         if (!valid) throw new Error('Deriv returned invalid Forex market details.');
         if (active) {
-          setMarkets(result.markets);
+          const updated = result.markets;
+          setMarkets((current) => JSON.stringify(current) === JSON.stringify(updated) ? current : updated);
+          setCatalogError('');
           setPair((current) =>
             result.markets?.some((market) => market.pair === current)
               ? current
@@ -195,8 +209,11 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
           setFeedState('Market catalog unavailable');
         }
       });
+    refreshCatalog();
+    const timer = window.setInterval(refreshCatalog, 60_000);
     return () => {
       active = false;
+      window.clearInterval(timer);
     };
   }, [load, view]);
 
@@ -330,6 +347,7 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
           result.source !== 'DERIV'
           || result.execution !== 'DISABLED'
           || result.account_id !== selectedAccountId
+          || (accountType && result.account_type !== accountType)
           || !Array.isArray(result.open_positions)
           || !Array.isArray(result.opposing_exposure)
           || !Array.isArray(result.recent_closed)
@@ -357,7 +375,7 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
       active = false;
       window.clearInterval(timer);
     };
-  }, [accountId, load, view]);
+  }, [accountId, accountType, load, view]);
 
   const closes = candles.map((candle) => Number(candle.close));
   const fastEma = ema(closes, 9);
@@ -398,10 +416,29 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
       symbol: position.symbol,
       contract_type: position.contract_type,
       label: 'Closed · realized P&L' as const,
-      time: position.sell_time,
+      time: position.sell_time ?? 'Unavailable',
       profit: position.profit,
     })),
   ].sort((a, b) => timestamp(b.time) - timestamp(a.time)) : [];
+
+  function exportPerformance() {
+    if (!performance) return;
+    const rows = [
+      ['Account', 'Currency', 'Market', 'Contract type', 'Activity', 'Timestamp (UTC)', 'Profit / loss'],
+      ...recentActivities.map((activity) => [
+        performance.account_id, performance.currency, activity.symbol, activity.contract_type,
+        activity.label, timestamp(activity.time) ? new Date(timestamp(activity.time)).toISOString() : '',
+        activity.profit,
+      ]),
+    ];
+    const csv = rows.map((row) => row.map((field) => `"${field.replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `playgo-pnl-${performance.account_id}.csv`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   return (
     <>
@@ -440,7 +477,7 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
             <strong>{selectedMarket.display_name}</strong>
             <span>Last {selectedTick ? selectedTick.quote.toFixed(digits) : '—'}</span>
             <span>EMA 9/21: {trend}</span>
-            <span>{selectedMarket.is_trading_suspended ? 'Suspended' : selectedMarket.exchange_is_open ? 'Open' : 'Closed'}</span>
+            <span>{marketStatus(selectedMarket)}</span>
           </div>
         ) : (
           <p className="accountMarketMessage">Loading active Forex markets...</p>
@@ -502,7 +539,16 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
 
         <div className="accountMarketDirectory">
           <div className="accountMarketDirectoryHeading">
-            <h3>Active Forex markets ({markets.length})</h3>
+            <h3>Forex markets ({visibleMarkets.length})</h3>
+            <label>
+              Market status
+              <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                <option value="All">All statuses</option>
+                <option>Open</option>
+                <option>Closed</option>
+                <option>Suspended</option>
+              </select>
+            </label>
             <label>
               Find a pair
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search pair" />
@@ -512,13 +558,14 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
             <table className="accountMarketTable">
               <thead><tr><th>Market</th><th>Status</th><th>Bid</th><th>Ask</th><th>Last</th></tr></thead>
               <tbody>
+                {!visibleMarkets.length && <tr><td colSpan={5}>No markets match the current filters.</td></tr>}
                 {visibleMarkets.map((market) => {
                   const tick = ticks[market.symbol];
                   const places = decimalPlaces(market.pip_size);
                   return (
                     <tr key={market.symbol} className={pair === market.pair ? 'selectedMarketRow' : ''}>
                       <td><button type="button" onClick={() => setPair(market.pair)}>{market.display_name}</button></td>
-                      <td>{market.is_trading_suspended ? 'Suspended' : market.exchange_is_open ? 'Open' : 'Closed'}</td>
+                      <td>{marketStatus(market)}</td>
                       <td>{tick?.bid?.toFixed(places) ?? '—'}</td>
                       <td>{tick?.ask?.toFixed(places) ?? '—'}</td>
                       <td>{tick?.quote.toFixed(places) ?? '—'}</td>
@@ -553,6 +600,7 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
         {performance && (
           <>
             <div className="accountPnlCards">
+              <article><span>Deriv balance</span><strong>{amount(accountBalance, performance.currency)}</strong><small>{performance.account_id}</small></article>
               <article><span>Unrealized P&amp;L</span><strong>{amount(performance.unrealized_pnl, performance.currency, true)}</strong><small>Current open positions</small></article>
               <article><span>Realized P&amp;L</span><strong>{amount(performance.realized_pnl, performance.currency, true)}</strong><small>{performance.realized_transaction_count} closed contracts · {performance.realized_window}</small></article>
             </div>
@@ -601,6 +649,7 @@ export default function DerivMarketPanel({ load, view, accountId, accountType }:
 
             <div className="accountPerformanceSection">
               <h3>Recent activities ({recentActivities.length})</h3>
+              <div><button type="button" className="exportCsvBtn" onClick={exportPerformance} disabled={!recentActivities.length}>Export Deriv P&amp;L CSV</button></div>
               {recentActivities.length ? (
                 <div className="accountMarketTableWrap accountRecentActivities">
                   <table className="accountMarketTable">

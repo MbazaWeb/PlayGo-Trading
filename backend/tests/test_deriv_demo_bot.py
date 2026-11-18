@@ -127,6 +127,30 @@ class DemoBotStateTests(unittest.TestCase):
         self.assertFalse(capped["running"])
         self.assertEqual(capped["status"], "daily_budget_reached")
 
+    def test_trade_activity_records_initiation_submission_and_confirmed_contract(self):
+        now = int(time.time())
+        _, reserved = bot._reserve_signal(
+            "DOT123", side="BUY", candle_epoch=300, now=now, balance="2"
+        )
+        self.assertTrue(reserved)
+        bot._mark_buy_started("DOT123")
+        result = bot._finish_trade("DOT123", "12345")
+        events = bot._public_state(result)["trade_activity"]
+        self.assertEqual([event["status"] for event in events], [
+            "Trade initiated", "Purchase submitted", "Purchase confirmed",
+        ])
+        self.assertEqual(events[-1]["contract_id"], "12345")
+        self.assertEqual(events[0]["initiated_at"], datetime.fromtimestamp(now, timezone.utc).isoformat())
+
+    def test_signal_pauses_when_deriv_demo_balance_cannot_cover_stake(self):
+        result, reserved = bot._reserve_signal(
+            "DOT123", side="BUY", candle_epoch=300, now=int(time.time()), balance="1"
+        )
+        self.assertFalse(reserved)
+        self.assertFalse(result["running"])
+        self.assertEqual(result["status"], "insufficient_balance")
+        self.assertEqual(result["daily_stake"], "0")
+
     def test_only_uncertain_buy_keeps_budget_reserved_for_review(self):
         self.state["daily_stake"] = "2"
         self.state["pending_trade"] = {"stage": "proposal"}

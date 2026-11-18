@@ -49,6 +49,15 @@ export type DemoBotState = {
   status: string;
   daily_stake: string;
   active_contract_id: string | null;
+  trade_activity?: {
+    time: string;
+    initiated_at: string;
+    symbol: string;
+    side: string;
+    stake: string;
+    status: string;
+    contract_id: string | null;
+  }[];
   last_trade: {
     contract_id: string;
     side: string;

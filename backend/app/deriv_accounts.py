@@ -235,7 +235,7 @@ def _performance_response(account, open_contracts, transactions):
             'direction': direction,
             'buy_price': str(stake),
             'profit': str(profit),
-            'purchase_time': row.get('purchase_time'),
+            'purchase_time': row.get('purchase_time') or row.get('date_start'),
         })
         exposure = exposures.setdefault(symbol, {'symbol': symbol, 'up_stake': Decimal('0'), 'down_stake': Decimal('0'), 'other_stake': Decimal('0'), 'up_count': 0, 'down_count': 0, 'other_count': 0})
         exposure[direction + '_stake'] += stake
@@ -404,23 +404,30 @@ async def account_performance(account_id: str, authorization: str = Header(defau
                     continue
                 open_contracts.append({**item, **contract})
 
-            profit_response = await _account_ws_request(
-                socket,
-                {'profit_table': 1, 'description': 1, 'limit': MAX_PROFIT_TRANSACTIONS, 'offset': 0, 'sort': 'DESC'},
-                102,
-            )
-            profit_table = profit_response.get('profit_table')
-            transactions = profit_table.get('transactions') if isinstance(profit_table, dict) else None
-            if not isinstance(transactions, list):
-                raise HTTPException(502, 'Deriv returned invalid closed position data.')
-            if not all(isinstance(row, dict) for row in transactions):
-                raise HTTPException(502, 'Deriv returned invalid closed position data.')
+            history_available = True
+            try:
+                profit_response = await asyncio.wait_for(_account_ws_request(
+                    socket,
+                    {'profit_table': 1, 'description': 1, 'limit': MAX_PROFIT_TRANSACTIONS, 'offset': 0, 'sort': 'DESC'},
+                    102,
+                ), timeout=8)
+                profit_table = profit_response.get('profit_table')
+                transactions = profit_table.get('transactions') if isinstance(profit_table, dict) else None
+                if not isinstance(transactions, list) or not all(isinstance(row, dict) for row in transactions):
+                    raise ValueError('Invalid closed position data')
+                # Validate the history independently so it cannot hide verified open positions.
+                _performance_response(account, [], transactions)
+            except (HTTPException, ValueError, TypeError, InvalidOperation, OSError,
+                    asyncio.TimeoutError, websockets.exceptions.WebSocketException):
+                history_available = False
+                transactions = []
             unresolved = await _reconcile_demo_contracts(socket, bot_ids, open_contracts, transactions)
             result = _performance_response(account, open_contracts, transactions)
             result.update({
                 'bot_contract_ids': bot_ids,
                 'unresolved_bot_contract_ids': unresolved,
                 'bot_tracking_unavailable': bot_tracking_unavailable,
+                'history_available': history_available,
             })
     except HTTPException:
         raise

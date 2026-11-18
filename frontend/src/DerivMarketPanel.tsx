@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ArrowDownRight, ArrowUpRight, Briefcase, Layers, RefreshCw } from 'lucide-react';
 
 type Candle = {
   epoch: number;
@@ -84,6 +85,7 @@ type Performance = {
   bot_contract_ids: string[];
   unresolved_bot_contract_ids: string[];
   bot_tracking_unavailable: boolean;
+  history_available?: boolean;
 };
 
 type Props = {
@@ -169,6 +171,7 @@ export default function DerivMarketPanel({
   const [performanceError, setPerformanceError] = useState('');
   const [chartBusy, setChartBusy] = useState(false);
   const [performanceBusy, setPerformanceBusy] = useState(false);
+  const [refreshPerformance, setRefreshPerformance] = useState(0);
 
   const selectedMarket = markets.find((market) => market.pair === pair);
   const visibleMarkets = useMemo(() => {
@@ -375,7 +378,6 @@ export default function DerivMarketPanel({
         if (active) setPerformanceBusy(false);
       }
     };
-    setPerformance(null);
     setPerformanceError('');
     void fetchPerformance();
     const timer = window.setInterval(() => void fetchPerformance(), botOnly ? 10_000 : 30_000);
@@ -383,7 +385,7 @@ export default function DerivMarketPanel({
       active = false;
       window.clearInterval(timer);
     };
-  }, [accountId, accountType, activeContractId, botOnly, load, view]);
+  }, [accountId, accountType, activeContractId, botOnly, load, refreshPerformance, view]);
 
   const closes = candles.map((candle) => Number(candle.close));
   const fastEma = ema(closes, 9);
@@ -636,13 +638,20 @@ export default function DerivMarketPanel({
             <h2 id="account-performance-heading">Profit, loss &amp; hedge exposure</h2>
             <p>{accountType === 'real' ? 'Real account' : 'Demo account'} · {performance?.currency ?? ''} · read-only</p>
           </div>
+          <div className="portfolioRefresh">
           <small role="status">
             {performanceBusy && !performance ? 'Loading account data...' : performance?.observed_at
               ? `Updated ${new Date(performance.observed_at).toLocaleTimeString()}`
               : 'Refreshes every 30 seconds'}
           </small>
+          <button type="button" className="exportCsvBtn" disabled={performanceBusy} onClick={() => setRefreshPerformance((current) => current + 1)}>
+            <RefreshCw size={14} aria-hidden="true" /> {performanceBusy ? 'Refreshing' : 'Refresh'}
+          </button>
+          </div>
         </div>
         {performanceError && <p className="realError" role="alert">{performanceError}</p>}
+        {performanceError && performance && <p className="accountMarketNote">Showing the last successful Deriv snapshot.</p>}
+        {performance?.history_available === false && <p className="accountMarketNote" role="status">Deriv closed history is temporarily unavailable. Open positions and exposure are current as of the last refresh.</p>}
         {incomplete && <p role="status">Some bot results are awaiting confirmation from Deriv. Totals reflect confirmed data.</p>}
         {!performance && !performanceError && <p className="accountMarketMessage" role="status">Loading open positions and closed results...</p>}
         {performance && (
@@ -650,50 +659,64 @@ export default function DerivMarketPanel({
             <div className="accountPnlCards">
               <article><span>Deriv balance</span><strong>{amount(accountBalance, performance.currency)}</strong><small>{performance.account_id}</small></article>
               <article><span>Unrealized P&amp;L</span><strong>{amount(performance.unrealized_pnl, performance.currency, true)}</strong><small>Current open positions</small></article>
-              <article><span>Realized P&amp;L</span><strong>{incomplete && !performance.realized_transaction_count ? '—' : amount(performance.realized_pnl, performance.currency, true)}</strong><small>{performance.realized_transaction_count} closed contracts · {performance.realized_window}</small></article>
+              <article><span>Realized P&amp;L</span><strong>{performance.history_available === false || (incomplete && !performance.realized_transaction_count) ? '—' : amount(performance.realized_pnl, performance.currency, true)}</strong><small>{performance.history_available === false ? 'Closed history unavailable' : `${performance.realized_transaction_count} closed contracts · ${performance.realized_window}`}</small></article>
             </div>
             {performance.realized_may_be_truncated && (
               <p className="accountMarketNote">The realized total may cover only the most recent transactions returned by Deriv.</p>
             )}
 
-            <div className="accountPerformanceSection">
-              <h3>Open positions ({performance.open_positions.length})</h3>
+            <section className="accountPerformanceSection portfolioPanel" aria-labelledby="open-positions-heading">
+              <div className="portfolioPanelHeading">
+                <Briefcase size={19} aria-hidden="true" />
+                <h3 id="open-positions-heading">Open positions</h3>
+                <span className="portfolioCount">{performance.open_positions.length}</span>
+              </div>
               {performance.open_positions.length ? (
                 <div className="accountMarketTableWrap">
                   <table className="accountMarketTable">
-                    <thead><tr><th>Market</th><th>Contract</th><th>Direction</th><th>Stake</th><th>Open P&amp;L</th></tr></thead>
+                    <thead><tr><th>Market</th><th>Contract</th><th>Direction</th><th>Opened</th><th>Stake</th><th>Open P&amp;L</th></tr></thead>
                     <tbody>{performance.open_positions.map((position) => (
                       <tr key={position.contract_id}>
-                        <td>{position.symbol}</td><td>{position.contract_type}</td><td>{position.direction.toUpperCase()}</td>
+                        <td><strong>{position.symbol}</strong></td>
+                        <td>{position.contract_type}<small className="portfolioContractId">#{position.contract_id}</small></td>
+                        <td><span className={`portfolioDirection portfolioDirection-${position.direction}`}>
+                          {position.direction === 'up' && <ArrowUpRight size={13} aria-hidden="true" />}
+                          {position.direction === 'down' && <ArrowDownRight size={13} aria-hidden="true" />}
+                          {position.direction === 'up' ? 'Up' : position.direction === 'down' ? 'Down' : 'Other'}
+                        </span></td>
+                        <td>{formatTime(position.purchase_time ?? '')}</td>
                         <td>{amount(position.buy_price, performance.currency)}</td>
-                        <td>{amount(position.profit, performance.currency, true)}</td>
+                        <td className={Number(position.profit) > 0 ? 'portfolioGain' : Number(position.profit) < 0 ? 'portfolioLoss' : ''}>{amount(position.profit, performance.currency, true)}</td>
                       </tr>
                     ))}</tbody>
                   </table>
                 </div>
-              ) : <p className="accountMarketMessage">No open positions in this account.</p>}
-            </div>
+              ) : <div className="portfolioEmpty"><strong>No open positions</strong><span>Open contracts from the selected Deriv account will appear here.</span></div>}
+            </section>
 
-            <div className="accountPerformanceSection">
-              <h3>Opposing positions by market</h3>
+            <section className="accountPerformanceSection portfolioPanel" aria-labelledby="opposing-exposure-heading">
+              <div className="portfolioPanelHeading">
+                <Layers size={19} aria-hidden="true" />
+                <h3 id="opposing-exposure-heading">Opposing positions by market</h3>
+              </div>
               {performance.opposing_exposure.length ? (
                 <div className="accountMarketTableWrap">
                   <table className="accountMarketTable">
                     <thead><tr><th>Market</th><th>Up stake</th><th>Down stake</th><th>Other</th><th>Opposing amount</th></tr></thead>
                     <tbody>{performance.opposing_exposure.map((exposure) => (
                       <tr key={exposure.symbol}>
-                        <td>{exposure.symbol}</td>
-                        <td>{amount(exposure.up_stake, performance.currency)} ({exposure.up_count})</td>
-                        <td>{amount(exposure.down_stake, performance.currency)} ({exposure.down_count})</td>
-                        <td>{amount(exposure.other_stake, performance.currency)} ({exposure.other_count})</td>
-                        <td>{amount(exposure.opposing_stake, performance.currency)}</td>
+                        <td><strong>{exposure.symbol}</strong></td>
+                        <td className="portfolioGain">{amount(exposure.up_stake, performance.currency)} <small className="portfolioContractId">{exposure.up_count} positions</small></td>
+                        <td className="portfolioLoss">{amount(exposure.down_stake, performance.currency)} <small className="portfolioContractId">{exposure.down_count} positions</small></td>
+                        <td>{amount(exposure.other_stake, performance.currency)} <small className="portfolioContractId">{exposure.other_count} positions</small></td>
+                        <td>{Number(exposure.opposing_stake) > 0 ? amount(exposure.opposing_stake, performance.currency) : 'No overlap'}</td>
                       </tr>
                     ))}</tbody>
                   </table>
                 </div>
-              ) : <p className="accountMarketMessage">No open positions to compare.</p>}
+              ) : <div className="portfolioEmpty"><strong>No exposure to compare</strong><span>Exposure is calculated from this account’s open contracts.</span></div>}
               <p className="accountMarketNote">{performance.exposure_note}</p>
-            </div>
+            </section>
 
             <div className="accountPerformanceSection">
               <h3>Recent activities ({recentActivities.length})</h3>
@@ -711,7 +734,7 @@ export default function DerivMarketPanel({
                     ))}</tbody>
                   </table>
                 </div>
-              ) : <p className="accountMarketMessage">No open or closed contract activity in this account.</p>}
+              ) : <p className="accountMarketMessage">{performance.history_available === false ? 'Closed contract activity is unavailable.' : 'No open or closed contract activity in this account.'}</p>}
               <p className="accountMarketNote">
                 Open P&amp;L is the latest Deriv snapshot. Closed P&amp;L is realized and comes from the latest {performance.realized_window.toLowerCase()}.
                 {performance.realized_may_be_truncated ? ' Older activity may be available in Deriv account history.' : ''}

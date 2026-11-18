@@ -155,6 +155,7 @@ class AccountPerformanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['realized_pnl'],'3')
         self.assertEqual(result['unrealized_pnl'],'-1')
         self.assertEqual(len(result['open_positions']),1)
+        self.assertTrue(result['history_available'])
         self.assertEqual(result['execution'],'DISABLED')
         verify.assert_awaited_once_with(connection,'demo-1')
         get_url.assert_awaited_once_with(connection,account)
@@ -188,6 +189,28 @@ class AccountPerformanceTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as caught:
                 await accounts._verified_account({'access_token':'private-token'},'real-not-listed')
         self.assertEqual(caught.exception.status_code,404)
+
+    async def test_open_exposure_survives_unavailable_closed_history(self):
+        account = {'account_id': 'demo-1', 'account_type': 'demo', 'currency': 'USD'}
+        requests = [
+            {'portfolio': {'contracts': [{'contract_id': 88}]}},
+            {'proposal_open_contract': {
+                'contract_id': 88, 'underlying_symbol': 'frxEURUSD', 'contract_type': 'CALL',
+                'buy_price': '4', 'profit': '-1', 'date_start': 1700000000, 'is_sold': 0,
+            }},
+            HTTPException(502, 'History unavailable'),
+        ]
+        with patch('app.deriv_signin.read_session', return_value={'access_token': 'private-token'}), \
+             patch.object(accounts, '_verified_account', new=AsyncMock(return_value=account)), \
+             patch.object(accounts, '_known_demo_contracts', return_value=[]), \
+             patch.object(accounts, '_options_websocket_url', new=AsyncMock(return_value='wss://example.test')), \
+             patch.object(accounts.websockets, 'connect', return_value=AsyncMock()), \
+             patch.object(accounts, '_account_ws_request', new=AsyncMock(side_effect=requests)):
+            response = await accounts.account_performance('demo-1', 'Bearer deriv_' + 'a' * 64)
+        result = json.loads(response.body)
+        self.assertFalse(result['history_available'])
+        self.assertEqual(result['open_positions'][0]['purchase_time'], 1700000000)
+        self.assertEqual(result['opposing_exposure'][0]['up_stake'], '4')
 
     async def test_reconciles_confirmed_demo_contract_missing_from_profit_table(self):
         transactions = []

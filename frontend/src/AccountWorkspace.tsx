@@ -657,11 +657,6 @@ export default function AccountWorkspace() {
 
       <footer>
         <span>PlayGo / Deriv account overview</span>
-        {token && (
-          <button disabled={oauthBusy} onClick={() => void signInWithDeriv()}>
-            Switch Deriv sign-in
-          </button>
-        )}
       </footer>
     </main>
   );

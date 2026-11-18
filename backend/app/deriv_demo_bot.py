@@ -8,6 +8,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from typing import Literal, Optional
 from urllib.parse import parse_qs, quote, urlsplit
 
 import httpx
@@ -15,7 +16,7 @@ import psycopg
 import websockets
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.agents import signal as ema_signal
 from app.deriv_accounts import parse_accounts
@@ -26,6 +27,14 @@ router = APIRouter()
 COLLECTION = "deriv_demo_bots"
 API_BASE = "https://api.derivws.com"
 SYMBOL = "frxEURUSD"
+ALLOWED_SYMBOLS = {
+    "frxEURUSD",
+    "frxGBPUSD",
+    "frxUSDJPY",
+    "frxAUDUSD",
+    "frxUSDCAD",
+    "frxEURGBP",
+}
 GRANULARITY = 300
 DURATION_MINUTES = 5
 STAKE = Decimal("2")
@@ -38,12 +47,64 @@ class DemoBotRequest(BaseModel):
     account_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+class DemoBotStartRequest(DemoBotRequest):
+    symbol: Optional[str] = None
+    contract_type: Optional[Literal["CALL_PUT", "CALL", "PUT"]] = None
+    duration_minutes: Optional[int] = Field(default=None, ge=1, le=60)
+    stake: Optional[Decimal] = Field(default=None, ge=Decimal("0.35"), le=Decimal("100"))
+    daily_stake_limit: Optional[Decimal] = Field(default=None, ge=Decimal("1"), le=Decimal("500"))
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if value not in ALLOWED_SYMBOLS:
+            raise ValueError(f"Unsupported symbol: {value}")
+        return value
+
+
 class DemoBotResolveRequest(DemoBotRequest):
     confirmed_account_review: bool
 
 
 class DemoBotProviderError(ValueError):
     pass
+
+
+def _state_symbol(state) -> str:
+    val = state.get("symbol")
+    return val if isinstance(val, str) and val in ALLOWED_SYMBOLS else SYMBOL
+
+
+def _state_contract_type(state) -> str:
+    val = state.get("contract_type")
+    return val if val in {"CALL_PUT", "CALL", "PUT"} else "CALL_PUT"
+
+
+def _state_duration(state) -> int:
+    val = state.get("duration_minutes")
+    return int(val) if isinstance(val, int) and 1 <= val <= 60 else DURATION_MINUTES
+
+
+def _state_stake(state) -> Decimal:
+    try:
+        val = Decimal(str(state.get("stake", STAKE)))
+        if val.is_finite() and Decimal("0.35") <= val <= Decimal("100"):
+            return val
+    except (InvalidOperation, TypeError, ValueError):
+        pass
+    return STAKE
+
+
+def _state_daily_limit(state) -> Decimal:
+    try:
+        val = Decimal(str(state.get("daily_stake_limit", DAILY_STAKE_LIMIT)))
+        if val.is_finite() and Decimal("1") <= val <= Decimal("500"):
+            return val
+    except (InvalidOperation, TypeError, ValueError):
+        pass
+    return DAILY_STAKE_LIMIT
 
 
 def _account_document_id(account_id):
@@ -57,6 +118,11 @@ def _utc_day():
 def _empty_state(account_id):
     return {
         "account_id": account_id,
+        "symbol": SYMBOL,
+        "contract_type": "CALL_PUT",
+        "duration_minutes": DURATION_MINUTES,
+        "stake": str(STAKE),
+        "daily_stake_limit": str(DAILY_STAKE_LIMIT),
         "running": False,
         "status": "stopped",
         "day": _utc_day(),
@@ -103,12 +169,12 @@ def _sync_run_record(cursor, account_id, state, *, session_id=None):
         config = {
             "strategy": "EMA_9_21_CROSS",
             "execution": "DEMO_ONLY",
-            "symbol": SYMBOL,
-            "contract_type": "CALL_ON_UP_CROSS_PUT_ON_DOWN_CROSS",
-            "duration_minutes": DURATION_MINUTES,
+            "symbol": _state_symbol(state),
+            "contract_type": _state_contract_type(state),
+            "duration_minutes": _state_duration(state),
             "currency": state["currency"],
-            "stake": str(STAKE),
-            "daily_stake_limit": str(DAILY_STAKE_LIMIT),
+            "stake": str(_state_stake(state)),
+            "daily_stake_limit": str(_state_daily_limit(state)),
         }
         cursor.execute(
             """insert into playgo_private.bot_runs
@@ -188,12 +254,12 @@ def _public_state(state):
     return {
         "execution": "DEMO_ONLY",
         "strategy": "EMA_9_21_CROSS",
-        "symbol": SYMBOL,
-        "contract_type": "CALL_ON_UP_CROSS_PUT_ON_DOWN_CROSS",
-        "duration_minutes": DURATION_MINUTES,
-        "stake": str(STAKE),
-        "daily_stake_limit": str(DAILY_STAKE_LIMIT),
         **state,
+        "symbol": _state_symbol(state),
+        "contract_type": _state_contract_type(state),
+        "duration_minutes": _state_duration(state),
+        "stake": str(_state_stake(state)),
+        "daily_stake_limit": str(_state_daily_limit(state)),
     }
 
 
@@ -272,9 +338,9 @@ async def _ws_request(socket, request, request_id):
     raise DemoBotProviderError("Deriv did not return the expected demo bot response.")
 
 
-def _reserve_signal(account_id, *, side, candle_epoch, now):
+def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL):
     with _locked_state(account_id) as state:
-        if not state["running"]:
+        if not state["running"] or _state_symbol(state) != symbol:
             return state, False
         day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
         if state["day"] != day:
@@ -303,18 +369,30 @@ def _reserve_signal(account_id, *, side, candle_epoch, now):
             state["last_trade"]["status"] = "duration elapsed"
         state["active_contract_id"] = None
         state["active_until"] = 0
+
+        # Filter signal against user-selected direction mode
+        allowed_mode = _state_contract_type(state)
+        if allowed_mode == "CALL" and side != "BUY":
+            side = None
+        elif allowed_mode == "PUT" and side != "SELL":
+            side = None
+
         if side is None:
             state["status"] = "running"
             return state, False
+
+        stake = _state_stake(state)
+        daily_limit = _state_daily_limit(state)
         daily_stake = Decimal(state["daily_stake"])
-        if daily_stake + STAKE > DAILY_STAKE_LIMIT:
+        if daily_stake + stake > daily_limit:
             state["running"] = False
             state["status"] = "daily_budget_reached"
             return state, False
-        state["daily_stake"] = str(daily_stake + STAKE)
+        state["daily_stake"] = str(daily_stake + stake)
         state["status"] = "trade_pending"
         state["pending_trade"] = {
             "side": side,
+            "stake": str(stake),
             "candle_epoch": candle_epoch,
             "created_at": now,
             "stage": "proposal",
@@ -331,12 +409,14 @@ def _finish_trade(account_id, contract_id):
             state["status"] = "needs_review"
             state["last_error"] = "Trade state changed unexpectedly. Check Deriv before restarting."
             return state
+        duration_minutes = _state_duration(state)
+        stake_used = pending.get("stake") or str(_state_stake(state))
         state["active_contract_id"] = str(contract_id)
-        state["active_until"] = int(time.time()) + DURATION_MINUTES * 60 + 60
+        state["active_until"] = int(time.time()) + duration_minutes * 60 + 60
         state["last_trade"] = {
             "contract_id": str(contract_id),
             "side": pending["side"],
-            "stake": str(STAKE),
+            "stake": str(stake_used),
             "created_at": datetime.fromtimestamp(pending["created_at"], timezone.utc).isoformat(),
             "status": "open",
         }
@@ -365,7 +445,8 @@ def _fail_trade(account_id, *, uncertain):
 def _release_proposal_stake(state):
     pending = state.get("pending_trade")
     if pending and pending.get("stage") == "proposal":
-        state["daily_stake"] = str(max(Decimal("0"), Decimal(state["daily_stake"]) - STAKE))
+        reserved_stake = Decimal(str(pending.get("stake", _state_stake(state))))
+        state["daily_stake"] = str(max(Decimal("0"), Decimal(state["daily_stake"]) - reserved_stake))
         state["pending_trade"] = None
 
 
@@ -378,17 +459,21 @@ def _mark_buy_started(account_id):
 
 async def _execute_trade(socket, state, side, account_id):
     contract_type = "CALL" if side == "BUY" else "PUT"
+    stake = _state_stake(state)
+    duration_minutes = _state_duration(state)
+    symbol = _state_symbol(state)
+
     proposal = await _ws_request(
         socket,
         {
             "proposal": 1,
-            "amount": float(STAKE),
+            "amount": float(stake),
             "basis": "stake",
             "contract_type": contract_type,
             "currency": state["currency"],
-            "duration": DURATION_MINUTES,
+            "duration": duration_minutes,
             "duration_unit": "m",
-            "underlying_symbol": SYMBOL,
+            "underlying_symbol": symbol,
         },
         1,
     )
@@ -399,7 +484,7 @@ async def _execute_trade(socket, state, side, account_id):
         ask_price = Decimal(str(details["ask_price"]))
     except (KeyError, InvalidOperation, TypeError, ValueError):
         raise DemoBotProviderError("Deriv returned an invalid demo price proposal.") from None
-    if not ask_price.is_finite() or ask_price <= 0 or ask_price > STAKE:
+    if not ask_price.is_finite() or ask_price <= 0 or ask_price > stake:
         raise DemoBotProviderError("The demo contract price exceeded the configured stake.")
     _mark_buy_started(account_id)
     result = await _ws_request(socket, {"buy": details["id"], "price": float(ask_price)}, 2)
@@ -426,7 +511,7 @@ async def get_demo_bot(account_id: str = Query(min_length=1, max_length=128, pat
 
 @router.post("/api/bot/start", include_in_schema=False)
 @router.post("/api/deriv/demo-bot/start")
-async def start_demo_bot(payload: DemoBotRequest, authorization: str = Header(default="")):
+async def start_demo_bot(payload: DemoBotStartRequest, authorization: str = Header(default="")):
     connection = _deriv_connection(authorization)
     account = await _demo_account(connection["access_token"], payload.account_id)
     session_id = connection.get("session_digest")
@@ -448,12 +533,41 @@ async def start_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
             if state["day"] != day:
                 state["day"] = day
                 state["daily_stake"] = "0"
-            if Decimal(state["daily_stake"]) + STAKE > DAILY_STAKE_LIMIT:
+
+            # Apply custom setup parameters if provided, else keep existing/default
+            next_symbol = payload.symbol if payload.symbol is not None else _state_symbol(state)
+            next_contract_type = (
+                payload.contract_type if payload.contract_type is not None else _state_contract_type(state)
+            )
+            next_duration = (
+                payload.duration_minutes if payload.duration_minutes is not None else _state_duration(state)
+            )
+            next_stake = payload.stake if payload.stake is not None else _state_stake(state)
+            next_daily_limit = (
+                payload.daily_stake_limit if payload.daily_stake_limit is not None else _state_daily_limit(state)
+            )
+
+            if next_stake > next_daily_limit:
+                raise HTTPException(422, "Stake per contract cannot exceed the daily stake cap.")
+
+            if Decimal(state["daily_stake"]) + next_stake > next_daily_limit:
                 raise HTTPException(409, "The daily demo stake cap has been reached. Try again after the UTC day resets.")
+
+            # Reset processed candle epoch if the user switched pairs
+            if _state_symbol(state) != next_symbol:
+                state["last_processed_epoch"] = 0
+
+            state["symbol"] = next_symbol
+            state["contract_type"] = next_contract_type
+            state["duration_minutes"] = next_duration
+            state["stake"] = str(next_stake.normalize())
+            state["daily_stake_limit"] = str(next_daily_limit.normalize())
             state["currency"] = account["currency"]
             state["running"] = True
             state["status"] = "running"
             state["last_error"] = None
+    except HTTPException:
+        raise
     except psycopg.errors.UndefinedTable as exc:
         logger.error(
             "demo_bot_start_schema_missing sqlstate=%s",
@@ -506,14 +620,16 @@ async def resolve_demo_bot(payload: DemoBotResolveRequest, authorization: str = 
                 raise HTTPException(409, "There is no uncertain demo trade to resolve.")
             pending = state["pending_trade"]
             if pending and pending.get("stage") == "buy":
+                duration_minutes = _state_duration(state)
+                stake_used = pending.get("stake") or str(_state_stake(state))
                 state["active_until"] = max(
                     state["active_until"],
-                    int(pending["created_at"]) + DURATION_MINUTES * 60 + 60,
+                    int(pending["created_at"]) + duration_minutes * 60 + 60,
                 )
                 state["last_trade"] = {
                     "contract_id": "unconfirmed",
                     "side": pending["side"],
-                    "stake": str(STAKE),
+                    "stake": str(stake_used),
                     "created_at": datetime.fromtimestamp(
                         pending["created_at"], timezone.utc
                     ).isoformat(),
@@ -550,12 +666,14 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
                         state["last_error"] = "A trade result is uncertain. Check Deriv before restarting."
                 return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
             return JSONResponse(_public_state(initial), headers={"Cache-Control": "no-store"})
+
+        symbol = _state_symbol(initial)
         ws_url = await _websocket_url(connection["access_token"], payload.account_id)
         async with websockets.connect(ws_url, open_timeout=10, close_timeout=3, max_size=65536) as socket:
             candles_response = await _ws_request(
                 socket,
                 {
-                    "ticks_history": SYMBOL,
+                    "ticks_history": symbol,
                     "end": "latest",
                     "count": 100,
                     "style": "candles",
@@ -566,8 +684,8 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
             candle_data = candles_response.get("candles")
             candles = parse_candles(
                 {"msg_type": "candles", "candles": candle_data,
-                 "echo_req": {"ticks_history": SYMBOL}},
-                SYMBOL,
+                 "echo_req": {"ticks_history": symbol}},
+                symbol,
             )["candles"]
             now = int(time.time())
             completed = [item for item in candles if item["epoch"] + GRANULARITY <= now]
@@ -585,12 +703,16 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
                 side=side,
                 candle_epoch=latest["epoch"],
                 now=now,
+                symbol=symbol,
             )
             if not reserved:
                 return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
             try:
                 contract_id = await _execute_trade(
-                    socket, {"currency": account["currency"]}, side, payload.account_id
+                    socket,
+                    {**state, "currency": account["currency"]},
+                    side,
+                    payload.account_id,
                 )
             except (websockets.WebSocketException, OSError, asyncio.TimeoutError,
                     DemoBotProviderError, ValueError, KeyError, TypeError):

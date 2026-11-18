@@ -84,6 +84,7 @@ type Performance = {
 
 type Props = {
   load: (path: string) => Promise<unknown>;
+  view: 'markets' | 'performance';
   accountId?: string;
   accountType?: 'demo' | 'real';
 };
@@ -132,7 +133,7 @@ function decimalPlaces(pipSize: string) {
   return Math.min(places, 8);
 }
 
-export default function DerivMarketPanel({ load, accountId, accountType }: Props) {
+export default function DerivMarketPanel({ load, view, accountId, accountType }: Props) {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [pair, setPair] = useState('');
   const [interval, setInterval] = useState('300');
@@ -158,6 +159,7 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
   }, [markets, search]);
 
   useEffect(() => {
+    if (view !== 'markets') return undefined;
     let active = true;
     setCatalogError('');
     setFeedState('Loading market catalog...');
@@ -196,10 +198,10 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
     return () => {
       active = false;
     };
-  }, [load]);
+  }, [load, view]);
 
   useEffect(() => {
-    if (!markets.length) return undefined;
+    if (view !== 'markets' || !markets.length) return undefined;
     let stopped = false;
     let retryTimer = 0;
     let frame = 0;
@@ -271,10 +273,10 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
       if (frame) window.cancelAnimationFrame(frame);
       socket?.close();
     };
-  }, [markets]);
+  }, [markets, view]);
 
   useEffect(() => {
-    if (!pair) return undefined;
+    if (view !== 'markets' || !pair) return undefined;
     let active = true;
     let firstLoad = true;
     setChartError('');
@@ -304,10 +306,10 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
       active = false;
       window.clearInterval(timer);
     };
-  }, [pair, interval, load]);
+  }, [pair, interval, load, view]);
 
   useEffect(() => {
-    if (!accountId) {
+    if (view !== 'performance' || !accountId) {
       setPerformance(null);
       setPerformanceError('');
       setPerformanceBusy(false);
@@ -355,7 +357,7 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
       active = false;
       window.clearInterval(timer);
     };
-  }, [accountId, load]);
+  }, [accountId, load, view]);
 
   const closes = candles.map((candle) => Number(candle.close));
   const fastEma = ema(closes, 9);
@@ -403,6 +405,7 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
 
   return (
     <>
+      {view === 'markets' && (
       <section id="forex-markets" className="accountMarkets" aria-labelledby="account-markets-heading">
         <div className="accountMarketsHeading">
           <div>
@@ -530,8 +533,9 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
           EMA 9/21 is an indicator, not a prediction. Quotes stream from Deriv; candle history refreshes every minute. No orders are placed here.
         </p>
       </section>
+      )}
 
-      {accountId && (
+      {view === 'performance' && accountId && (
       <section id="profit-loss-exposure" className="accountPerformance" aria-labelledby="account-performance-heading">
         <div className="accountPerformanceHeading">
           <div>
@@ -623,7 +627,7 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
         </p>
       </section>
       )}
-      {!accountId && (
+      {view === 'performance' && !accountId && (
         <section id="profit-loss-exposure" className="accountPerformance accountPerformanceLocked">
           <h2>Account P&amp;L and hedge exposure</h2>
           <p>Sign in with Deriv and select an account to view its open positions, profit and loss, and opposing exposure.</p>

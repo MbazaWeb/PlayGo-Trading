@@ -1,4 +1,3 @@
-from pathlib import Path
 """Phase 7H.4 offline deployment acceptance gate.
 
 Runs verified local test suites and checks explicit deployment configuration.
@@ -8,6 +7,7 @@ import argparse
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from app import postgres_deployment_preflight as preflight
 from app import postgres_phase7g_final_review as review

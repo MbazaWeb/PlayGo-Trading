@@ -18,6 +18,7 @@ router = APIRouter()
 COLLECTION = 'deriv_oauth_connections'
 API_BASE = 'https://api.derivws.com'
 MAX_PROFIT_TRANSACTIONS = 500
+MAX_BOT_CONTRACT_LOOKUPS = 5
 
 
 def save_connection(owner_id, connection):
@@ -288,6 +289,62 @@ def _performance_response(account, open_contracts, transactions):
     }
 
 
+def _known_demo_contracts(account):
+    from app.deriv_demo_bot import _load_state
+
+    state = _load_state(account['account_id'])
+    trades = [*(state.get('trade_activity') or []), state.get('last_trade') or {}]
+    return list(dict.fromkeys(
+        contract_id for row in reversed(trades)
+        if isinstance(contract_id := row.get('contract_id'), str)
+        and re.fullmatch(r'[0-9]{1,18}', contract_id)
+    ))
+
+
+async def _reconcile_demo_contracts(socket, bot_ids, open_contracts, transactions):
+    known_ids = {str(row.get('contract_id')) for row in [*open_contracts, *transactions]}
+    by_transaction = {
+        str(row['transaction_id']): row for row in transactions
+        if row.get('transaction_id') is not None
+    }
+    missing_ids = [contract_id for contract_id in bot_ids if contract_id not in known_ids]
+    for request_id, contract_id in enumerate(missing_ids[:MAX_BOT_CONTRACT_LOOKUPS], start=103):
+        try:
+            response = await asyncio.wait_for(_account_ws_request(
+                socket, {'proposal_open_contract': 1, 'contract_id': int(contract_id)}, request_id
+            ), timeout=3)
+        except (HTTPException, OSError, asyncio.TimeoutError, websockets.exceptions.WebSocketException):
+            continue
+        contract = response.get('proposal_open_contract')
+        if not isinstance(contract, dict) or str(contract.get('contract_id')) != contract_id:
+            continue
+        if contract.get('is_sold') not in (1, True, '1'):
+            if contract.get('status') == 'open' and contract.get('profit') is not None:
+                open_contracts.append(contract)
+                known_ids.add(contract_id)
+            continue
+        trade_ids = contract.get('transaction_ids')
+        sell_id = trade_ids.get('sell') if isinstance(trade_ids, dict) else None
+        existing = by_transaction.get(str(sell_id))
+        if existing is not None:
+            existing['contract_id'] = contract_id
+            known_ids.add(contract_id)
+            continue
+        try:
+            buy = _money(contract.get('buy_price'), 'settled contract buy price')
+            sell_price = contract.get('sell_price')
+            sell = (_money(sell_price, 'settled contract sell price') if sell_price is not None
+                    else buy + _money(contract.get('profit'), 'settled contract profit'))
+        except (ValueError, TypeError, InvalidOperation):
+            continue
+        transactions.append({
+            **contract, 'buy_price': str(buy), 'sell_price': str(sell),
+            'sell_time': contract.get('sell_time') or contract.get('date_settlement'),
+        })
+        known_ids.add(contract_id)
+    return [contract_id for contract_id in missing_ids if contract_id not in known_ids]
+
+
 @router.get('/api/deriv/accounts/{account_id}/performance')
 async def account_performance(account_id: str, authorization: str = Header(default='')):
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', account_id):
@@ -307,6 +364,13 @@ async def account_performance(account_id: str, authorization: str = Header(defau
         raise HTTPException(401, 'Sign in with Deriv to view account performance.')
 
     account = await _verified_account(connection, account_id)
+    bot_ids = []
+    bot_tracking_unavailable = False
+    if account['account_type'] == 'demo' and authorization.startswith('Bearer deriv_'):
+        try:
+            bot_ids = await asyncio.to_thread(_known_demo_contracts, account)
+        except (HTTPException, psycopg.Error, OSError, RuntimeError):
+            bot_tracking_unavailable = True
     ws_url = await _options_websocket_url(connection, account)
     try:
         async with websockets.connect(
@@ -349,7 +413,15 @@ async def account_performance(account_id: str, authorization: str = Header(defau
             transactions = profit_table.get('transactions') if isinstance(profit_table, dict) else None
             if not isinstance(transactions, list):
                 raise HTTPException(502, 'Deriv returned invalid closed position data.')
+            if not all(isinstance(row, dict) for row in transactions):
+                raise HTTPException(502, 'Deriv returned invalid closed position data.')
+            unresolved = await _reconcile_demo_contracts(socket, bot_ids, open_contracts, transactions)
             result = _performance_response(account, open_contracts, transactions)
+            result.update({
+                'bot_contract_ids': bot_ids,
+                'unresolved_bot_contract_ids': unresolved,
+                'bot_tracking_unavailable': bot_tracking_unavailable,
+            })
     except HTTPException:
         raise
     except (websockets.exceptions.WebSocketException, OSError, asyncio.TimeoutError):

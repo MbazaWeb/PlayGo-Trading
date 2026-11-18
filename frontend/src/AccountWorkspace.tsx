@@ -18,6 +18,7 @@ import AccountPage from './pages/deriv/AccountPage';
 import MarketPage from './pages/deriv/MarketPage';
 import TradeBotPage from './pages/deriv/TradeBotPage';
 import PnlHedgePage from './pages/deriv/PnlHedgePage';
+import DerivMarketPanel from './DerivMarketPanel';
 
 const NOTIF_STORAGE_KEY = 'playgo_notification_logs';
 
@@ -637,6 +638,18 @@ export default function AccountWorkspace() {
           onBotAction={(action, config) => void botAction(action, config)}
           onResolveBot={() => void resolveBot()}
           onSignInDeriv={() => void signInWithDeriv()}
+          results={derivSession && selected?.account_type === 'demo' && (
+            <DerivMarketPanel
+              key={selected.account_id}
+              view="performance"
+              load={loadMarkets}
+              accountId={selected.account_id}
+              accountType="demo"
+              accountBalance={selected.balance}
+              activeContractId={botState?.active_contract_id}
+              botOnly
+            />
+          )}
         />
       )}
 

@@ -9,6 +9,7 @@ type Props = {
   botBusy: boolean;
   botError: string;
   oauthBusy: boolean;
+  results?: React.ReactNode;
   onBotAction: (action: 'start' | 'stop', config?: BotConfig) => void;
   onResolveBot: () => void;
   onSignInDeriv: () => void;
@@ -21,6 +22,11 @@ const PAIRS = [
   { value: 'frxAUDUSD', label: 'AUD/USD' },
   { value: 'frxUSDCAD', label: 'USD/CAD' },
   { value: 'frxEURGBP', label: 'EUR/GBP' },
+  { value: 'R_10', label: 'Volatility 10 Index' },
+  { value: 'R_25', label: 'Volatility 25 Index' },
+  { value: 'R_50', label: 'Volatility 50 Index' },
+  { value: 'R_75', label: 'Volatility 75 Index' },
+  { value: 'R_100', label: 'Volatility 100 Index' },
 ];
 
 export default function TradeBotPage({
@@ -30,6 +36,7 @@ export default function TradeBotPage({
   botBusy,
   botError,
   oauthBusy,
+  results,
   onBotAction,
   onResolveBot,
   onSignInDeriv,
@@ -252,6 +259,7 @@ export default function TradeBotPage({
             </small>
           )}
 
+          {results}
           <section className="accountPerformanceSection" aria-labelledby="trade-activity-heading">
             <h3 id="trade-activity-heading">Logs &amp; trade activity</h3>
             <p role="status">{botState?.running ? 'Bot running' : 'Bot paused'}
@@ -267,7 +275,7 @@ export default function TradeBotPage({
                       <td><time dateTime={event.time}>{new Date(event.time).toLocaleString()}</time></td>
                       <td><time dateTime={event.initiated_at}>{new Date(event.initiated_at).toLocaleString()}</time></td>
                       <td>{event.symbol}</td><td>{event.side === 'BUY' ? 'Rise' : 'Fall'}</td>
-                      <td>{selected.currency} {event.stake}</td><td>{event.status}</td>
+                      <td>{selected.currency} {Number(event.stake).toFixed(2)}</td><td>{event.status}</td>
                       <td>{event.contract_id ?? '—'}</td>
                     </tr>
                   ))}</tbody>

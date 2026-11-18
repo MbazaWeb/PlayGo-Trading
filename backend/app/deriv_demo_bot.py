@@ -34,6 +34,11 @@ ALLOWED_SYMBOLS = {
     "frxAUDUSD",
     "frxUSDCAD",
     "frxEURGBP",
+    "R_10",
+    "R_25",
+    "R_50",
+    "R_75",
+    "R_100",
 }
 GRANULARITY = 300
 DURATION_MINUTES = 5
@@ -591,8 +596,8 @@ async def start_demo_bot(payload: DemoBotStartRequest, authorization: str = Head
             state["symbol"] = next_symbol
             state["contract_type"] = next_contract_type
             state["duration_minutes"] = next_duration
-            state["stake"] = str(next_stake.normalize())
-            state["daily_stake_limit"] = str(next_daily_limit.normalize())
+            state["stake"] = format(next_stake, "f")
+            state["daily_stake_limit"] = format(next_daily_limit, "f")
             state["currency"] = account["currency"]
             state["running"] = True
             state["status"] = "running"

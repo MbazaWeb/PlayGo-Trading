@@ -57,6 +57,7 @@ type ClosedPosition = {
 
 type AccountActivity = {
   id: string;
+  contractId: string;
   symbol: string;
   contract_type: string;
   label: 'Open · current P&L' | 'Closed · realized P&L';
@@ -80,6 +81,9 @@ type Performance = {
   opposing_exposure: Exposure[];
   exposure_note: string;
   observed_at: string;
+  bot_contract_ids: string[];
+  unresolved_bot_contract_ids: string[];
+  bot_tracking_unavailable: boolean;
 };
 
 type Props = {
@@ -88,6 +92,8 @@ type Props = {
   accountId?: string;
   accountType?: 'demo' | 'real';
   accountBalance?: string | null;
+  botOnly?: boolean;
+  activeContractId?: string | null;
 };
 
 const INTERVALS = [
@@ -146,7 +152,9 @@ function decimalPlaces(pipSize: string) {
   return Math.min(places, 8);
 }
 
-export default function DerivMarketPanel({ load, view, accountId, accountType, accountBalance }: Props) {
+export default function DerivMarketPanel({
+  load, view, accountId, accountType, accountBalance, botOnly = false, activeContractId,
+}: Props) {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [pair, setPair] = useState('');
   const [interval, setInterval] = useState('300');
@@ -370,12 +378,12 @@ export default function DerivMarketPanel({ load, view, accountId, accountType, a
     setPerformance(null);
     setPerformanceError('');
     void fetchPerformance();
-    const timer = window.setInterval(() => void fetchPerformance(), 30_000);
+    const timer = window.setInterval(() => void fetchPerformance(), botOnly ? 10_000 : 30_000);
     return () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [accountId, accountType, load, view]);
+  }, [accountId, accountType, activeContractId, botOnly, load, view]);
 
   const closes = candles.map((candle) => Number(candle.close));
   const fastEma = ema(closes, 9);
@@ -405,6 +413,7 @@ export default function DerivMarketPanel({ load, view, accountId, accountType, a
   const recentActivities: AccountActivity[] = performance ? [
     ...performance.open_positions.map((position) => ({
       id: `open-${position.contract_id}`,
+      contractId: position.contract_id,
       symbol: position.symbol,
       contract_type: position.contract_type,
       label: 'Open · current P&L' as const,
@@ -413,6 +422,7 @@ export default function DerivMarketPanel({ load, view, accountId, accountType, a
     })),
     ...performance.recent_closed.map((position, index) => ({
       id: `closed-${position.contract_id}-${position.sell_time}-${index}`,
+      contractId: position.contract_id,
       symbol: position.symbol,
       contract_type: position.contract_type,
       label: 'Closed · realized P&L' as const,
@@ -420,6 +430,43 @@ export default function DerivMarketPanel({ load, view, accountId, accountType, a
       profit: position.profit,
     })),
   ].sort((a, b) => timestamp(b.time) - timestamp(a.time)) : [];
+
+  const botIds = new Set(performance?.bot_contract_ids ?? []);
+  const botOpen = performance?.open_positions.filter((position) => botIds.has(position.contract_id)) ?? [];
+  const botClosed = performance?.recent_closed.filter((position) => botIds.has(position.contract_id)) ?? [];
+  const botProfit = botClosed.reduce((total, position) => total + Number(position.profit), 0);
+  const botWins = botClosed.filter((position) => Number(position.profit) > 0).length;
+  const incomplete = !!performance?.bot_tracking_unavailable || !!performance?.unresolved_bot_contract_ids?.length;
+
+  if (botOnly) {
+    const currency = performance?.currency ?? 'USD';
+    return (
+      <section className="accountPerformance" aria-labelledby="bot-results-heading">
+        <h2 id="bot-results-heading">Demo bot results</h2>
+        {performanceError && <p className="realError" role="alert">{performanceError}</p>}
+        {incomplete && <p role="status">Some bot results are awaiting confirmation from Deriv.</p>}
+        <div className="accountPnlCards">
+          <article><span>Realized P&amp;L</span><strong>{botClosed.length ? amount(String(botProfit), currency, true) : '—'}</strong><small>{botClosed.length} confirmed settlements</small></article>
+          <article><span>Win rate</span><strong>{botClosed.length ? `${(100 * botWins / botClosed.length).toFixed(1)}%` : '—'}</strong><small>{botWins} wins</small></article>
+          <article><span>Open P&amp;L</span><strong>{botOpen.length ? amount(String(botOpen.reduce((sum, position) => sum + Number(position.profit), 0)), currency, true) : '—'}</strong><small>{botOpen.length} open contracts</small></article>
+          <article><span>Deriv demo balance</span><strong>{amount(accountBalance, currency)}</strong></article>
+        </div>
+        <div className="accountMarketTableWrap accountRecentActivities">
+          <table className="accountMarketTable">
+            <thead><tr><th>Contract ID</th><th>Market</th><th>Activity</th><th>Time</th><th>P&amp;L</th></tr></thead>
+            <tbody>
+              {recentActivities.filter((activity) => botIds.has(activity.contractId)).map((activity) => (
+                <tr key={activity.id}>
+                  <td>{activity.contractId}</td><td>{activity.symbol}</td><td>{activity.label}</td>
+                  <td>{formatTime(activity.time)}</td><td>{amount(activity.profit, currency, true)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
 
   function exportPerformance() {
     if (!performance) return;
@@ -596,13 +643,14 @@ export default function DerivMarketPanel({ load, view, accountId, accountType, a
           </small>
         </div>
         {performanceError && <p className="realError" role="alert">{performanceError}</p>}
+        {incomplete && <p role="status">Some bot results are awaiting confirmation from Deriv. Totals reflect confirmed data.</p>}
         {!performance && !performanceError && <p className="accountMarketMessage" role="status">Loading open positions and closed results...</p>}
         {performance && (
           <>
             <div className="accountPnlCards">
               <article><span>Deriv balance</span><strong>{amount(accountBalance, performance.currency)}</strong><small>{performance.account_id}</small></article>
               <article><span>Unrealized P&amp;L</span><strong>{amount(performance.unrealized_pnl, performance.currency, true)}</strong><small>Current open positions</small></article>
-              <article><span>Realized P&amp;L</span><strong>{amount(performance.realized_pnl, performance.currency, true)}</strong><small>{performance.realized_transaction_count} closed contracts · {performance.realized_window}</small></article>
+              <article><span>Realized P&amp;L</span><strong>{incomplete && !performance.realized_transaction_count ? '—' : amount(performance.realized_pnl, performance.currency, true)}</strong><small>{performance.realized_transaction_count} closed contracts · {performance.realized_window}</small></article>
             </div>
             {performance.realized_may_be_truncated && (
               <p className="accountMarketNote">The realized total may cover only the most recent transactions returned by Deriv.</p>

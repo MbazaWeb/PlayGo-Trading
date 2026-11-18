@@ -189,6 +189,23 @@ class AccountPerformanceTests(unittest.IsolatedAsyncioTestCase):
                 await accounts._verified_account({'access_token':'private-token'},'real-not-listed')
         self.assertEqual(caught.exception.status_code,404)
 
+    async def test_reconciles_confirmed_demo_contract_missing_from_profit_table(self):
+        transactions = []
+        with patch.object(accounts, '_account_ws_request', new_callable=AsyncMock) as request:
+            request.return_value = {'proposal_open_contract': {
+                'contract_id': 20980430539, 'is_sold': 1, 'buy_price': '20',
+                'sell_price': None, 'profit': '14.50', 'underlying_symbol': 'frxAUDUSD',
+            }}
+            missing = await accounts._reconcile_demo_contracts(
+                object(), ['20980430539'], [], transactions,
+            )
+        self.assertEqual(missing, [])
+        result = accounts._performance_response(
+            {'account_id': 'demo-1', 'account_type': 'demo', 'currency': 'USD'}, [], transactions,
+        )
+        self.assertEqual(result['realized_pnl'], '14.50')
+        self.assertEqual(result['recent_closed'][0]['contract_id'], '20980430539')
+
     def test_pnl_and_opposing_exposure_are_derived_from_deriv_positions(self):
         result=accounts._performance_response(
             {'account_id':'demo-1','account_type':'demo','currency':'USD'},

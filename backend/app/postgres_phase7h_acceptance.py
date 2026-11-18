@@ -1,3 +1,4 @@
+from pathlib import Path
 """Phase 7H.4 offline deployment acceptance gate.
 
 Runs verified local test suites and checks explicit deployment configuration.
@@ -42,8 +43,24 @@ def main(argv=None):
     for note in notes:
         print("NOTE: " + note)
     print("CHECK: running offline regression suites")
-    result = subprocess.run([sys.executable, "-m", "unittest", "-v", *SUITES],
-                            check=False)
+    backend_dir = Path(__file__).resolve().parents[1]
+    tests_dir = backend_dir / "tests"
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [
+            str(tests_dir),
+            str(backend_dir),
+            env.get("PYTHONPATH", ""),
+        ])
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "unittest", "-v", *SUITES],
+        cwd=backend_dir,
+        env=env,
+        check=False,
+    )
     if result.returncode != 0:
         print("FAIL: Phase 7H.4 regression suites")
         return 1

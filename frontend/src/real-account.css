@@ -8,3 +8,8 @@
 @media(max-width:600px){.accountMarketDirectoryHeading,.accountPerformanceHeading{align-items:flex-start;flex-direction:column}.accountMarketDirectoryHeading label{width:100%;justify-content:space-between}.accountMarketDirectoryHeading input{flex:1;min-width:0}.accountPerformance{padding:16px}.accountMarketSummary{gap:9px}.accountMarketTable th,.accountMarketTable td{padding:9px}.accountPnlCards{grid-template-columns:1fr}}
 .accountPerformanceLocked>h2{margin:0;color:#dbe6f5;font-size:15px}.accountPerformanceLocked>p{margin:8px 0 0;color:#93a5bc;font-size:11px;line-height:1.7}
 .accountRecentActivities{max-height:420px;overflow:auto}
+.dashboardSubnav{display:flex;flex:1 0 100%;align-items:center;gap:6px;min-width:0;overflow-x:auto;padding:10px 0 0;border-top:1px solid #293749}
+.dashboardSubnav a{flex:0 0 auto;padding:9px 11px;border-radius:8px;color:#a8bdd3;text-decoration:none;font-size:11px;font-weight:600;white-space:nowrap}
+.dashboardSubnav a:hover,.dashboardSubnav a:focus-visible{background:#192737;color:#edf3ff}
+.realWorkspace section[id]{scroll-margin-top:150px}
+@media(max-width:600px){.dashboardSubnav{gap:4px;padding-top:8px}.dashboardSubnav a{padding:9px 8px;font-size:10px}}

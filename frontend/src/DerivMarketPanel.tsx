@@ -403,7 +403,7 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
 
   return (
     <>
-      <section className="accountMarkets" aria-labelledby="account-markets-heading">
+      <section id="forex-markets" className="accountMarkets" aria-labelledby="account-markets-heading">
         <div className="accountMarketsHeading">
           <div>
             <h2 id="account-markets-heading">Forex markets</h2>
@@ -532,7 +532,7 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
       </section>
 
       {accountId && (
-      <section className="accountPerformance" aria-labelledby="account-performance-heading">
+      <section id="profit-loss-exposure" className="accountPerformance" aria-labelledby="account-performance-heading">
         <div className="accountPerformanceHeading">
           <div>
             <h2 id="account-performance-heading">Profit, loss &amp; hedge exposure</h2>
@@ -624,7 +624,7 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
       </section>
       )}
       {!accountId && (
-        <section className="accountPerformance accountPerformanceLocked">
+        <section id="profit-loss-exposure" className="accountPerformance accountPerformanceLocked">
           <h2>Account P&amp;L and hedge exposure</h2>
           <p>Sign in with Deriv and select an account to view its open positions, profit and loss, and opposing exposure.</p>
         </section>

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+import psycopg
 
 from app import deriv_demo_bot as bot
 
@@ -173,6 +174,27 @@ class DemoBotStateTests(unittest.TestCase):
         self.assertEqual(response.json()["execution"], "DEMO_ONLY")
         self.assertEqual(response.json()["stake"], "2")
         self.assertEqual(response.json()["daily_stake_limit"], "5")
+
+    def test_start_reports_missing_run_ledger_schema(self):
+        app = FastAPI()
+        app.include_router(bot.router)
+        client = TestClient(app)
+        with patch.object(
+            bot,
+            "_deriv_connection",
+            return_value={"access_token": "private-token", "session_digest": "a" * 64},
+        ), patch.object(
+            bot, "_demo_account", new=AsyncMock(return_value={"currency": "USD"})
+        ), patch.object(
+            bot, "_locked_state", side_effect=psycopg.errors.UndefinedTable("missing table")
+        ):
+            response = client.post(
+                "/api/deriv/demo-bot/start",
+                json={"account_id": "DOT123"},
+                headers={"Authorization": "Bearer deriv_" + "a" * 64},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Apply backend/sql/supabase_foundation.sql", response.json()["detail"])
 
     def test_start_rejects_an_already_running_bot(self):
         app = FastAPI()

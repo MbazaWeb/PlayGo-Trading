@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 from contextlib import contextmanager
@@ -30,6 +31,7 @@ DURATION_MINUTES = 5
 STAKE = Decimal("2")
 DAILY_STAKE_LIMIT = Decimal("5")
 MAX_CANDLE_AGE = 600
+logger = logging.getLogger("playgo.operational")
 
 
 class DemoBotRequest(BaseModel):
@@ -452,8 +454,25 @@ async def start_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
             state["running"] = True
             state["status"] = "running"
             state["last_error"] = None
-    except (psycopg.Error, OSError, RuntimeError):
-        raise HTTPException(503, "The demo bot could not be started.") from None
+    except psycopg.errors.UndefinedTable as exc:
+        logger.error(
+            "demo_bot_start_schema_missing sqlstate=%s",
+            exc.sqlstate,
+        )
+        raise HTTPException(
+            503,
+            "Demo bot storage is not initialized. Apply backend/sql/supabase_foundation.sql, then retry.",
+        ) from None
+    except (psycopg.Error, OSError, RuntimeError) as exc:
+        logger.error(
+            "demo_bot_start_persistence_failed error_type=%s sqlstate=%s",
+            type(exc).__name__,
+            getattr(exc, "sqlstate", None),
+        )
+        raise HTTPException(
+            503,
+            "The demo bot could not save its run state. Check database availability and retry.",
+        ) from None
     return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
 
 

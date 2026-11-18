@@ -55,6 +55,15 @@ type ClosedPosition = {
   sell_time: number | string;
 };
 
+type AccountActivity = {
+  id: string;
+  symbol: string;
+  contract_type: string;
+  label: 'Open · current P&L' | 'Closed · realized P&L';
+  time: number | string;
+  profit: string;
+};
+
 type Performance = {
   source: 'DERIV';
   execution: 'DISABLED';
@@ -111,6 +120,11 @@ function amount(value: string | null | undefined, currency: string, signed = fal
 function formatTime(value: number | string) {
   const numeric = typeof value === 'number' || /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value);
   return Number.isFinite(numeric) ? new Date(numeric).toLocaleString() : 'Unavailable';
+}
+
+function timestamp(value: number | string) {
+  const parsed = typeof value === 'number' || /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function decimalPlaces(pipSize: string) {
@@ -368,6 +382,24 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
   const slowPath = slowEma.map((price, index) => `${index ? 'L' : 'M'}${x(index)},${y(price)}`).join(' ');
   const selectedTick = selectedMarket ? ticks[selectedMarket.symbol] : undefined;
   const digits = selectedMarket ? decimalPlaces(selectedMarket.pip_size) : 5;
+  const recentActivities: AccountActivity[] = performance ? [
+    ...performance.open_positions.map((position) => ({
+      id: `open-${position.contract_id}`,
+      symbol: position.symbol,
+      contract_type: position.contract_type,
+      label: 'Open · current P&L' as const,
+      time: position.purchase_time ?? 'Unavailable',
+      profit: position.profit,
+    })),
+    ...performance.recent_closed.map((position, index) => ({
+      id: `closed-${position.contract_id}-${position.sell_time}-${index}`,
+      symbol: position.symbol,
+      contract_type: position.contract_type,
+      label: 'Closed · realized P&L' as const,
+      time: position.sell_time,
+      profit: position.profit,
+    })),
+  ].sort((a, b) => timestamp(b.time) - timestamp(a.time)) : [];
 
   return (
     <>
@@ -564,21 +596,25 @@ export default function DerivMarketPanel({ load, accountId, accountType }: Props
             </div>
 
             <div className="accountPerformanceSection">
-              <h3>Recent closed contracts</h3>
-              {performance.recent_closed.length ? (
-                <div className="accountMarketTableWrap">
+              <h3>Recent activities ({recentActivities.length})</h3>
+              {recentActivities.length ? (
+                <div className="accountMarketTableWrap accountRecentActivities">
                   <table className="accountMarketTable">
-                    <thead><tr><th>Market</th><th>Contract</th><th>Closed</th><th>Realized P&amp;L</th></tr></thead>
-                    <tbody>{performance.recent_closed.slice(0, 10).map((position, index) => (
-                      <tr key={`${position.contract_id}-${position.sell_time}-${index}`}>
-                        <td>{position.symbol}</td><td>{position.contract_type}</td>
-                        <td>{formatTime(position.sell_time)}</td>
-                        <td>{amount(position.profit, performance.currency, true)}</td>
+                    <thead><tr><th>Market</th><th>Contract</th><th>Activity</th><th>Time</th><th>Profit / loss</th></tr></thead>
+                    <tbody>{recentActivities.map((activity) => (
+                      <tr key={activity.id}>
+                        <td>{activity.symbol}</td><td>{activity.contract_type}</td>
+                        <td>{activity.label}</td><td>{formatTime(activity.time)}</td>
+                        <td>{amount(activity.profit, performance.currency, true)}</td>
                       </tr>
                     ))}</tbody>
                   </table>
                 </div>
-              ) : <p className="accountMarketMessage">No closed contracts in the returned history.</p>}
+              ) : <p className="accountMarketMessage">No open or closed contract activity in this account.</p>}
+              <p className="accountMarketNote">
+                Open P&amp;L is the latest Deriv snapshot. Closed P&amp;L is realized and comes from the latest {performance.realized_window.toLowerCase()}.
+                {performance.realized_may_be_truncated ? ' Older activity may be available in Deriv account history.' : ''}
+              </p>
             </div>
           </>
         )}

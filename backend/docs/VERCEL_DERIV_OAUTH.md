@@ -38,9 +38,12 @@ account selection.
 `GET /api/deriv/accounts/{account_id}/performance` checks that the account is
 present in the authenticated Deriv account list before opening its account-scoped
 OTP WebSocket. It reports Deriv open-contract P&L, realized P&L from up to the
-100 most recent profit-table transactions, and opposing directional positions
-grouped by underlying. Account figures refresh in the frontend every 30 seconds.
-The realized total may be truncated when Deriv returns 100 transactions.
+500 most recent profit-table transactions, and opposing directional positions
+grouped by underlying. The Recent activities table lists each returned closed
+contract's realized P&L and current P&L for each open contract. Account figures
+refresh in the frontend every 30 seconds. The realized total may be truncated
+when Deriv returns 500 transactions; older items remain available in Deriv
+account history.
 Opposing positions are informational only, are not guaranteed to offset losses,
 and never trigger orders. Real-account execution remains disabled.
 
@@ -61,6 +64,9 @@ Demo bot run history is recorded in `playgo_private.bot_runs`; the existing
 and trade recovery. Apply the updated `sql/supabase_foundation.sql` to the
 PostgreSQL database before deploying this version. Each run stores only the
 SHA-256 digest of its Deriv session token, never the bearer token itself.
+If bot start reports that storage is not initialized, apply that SQL file in
+the Supabase SQL editor and retry; the backend logs only the database error
+type and SQLSTATE, never raw exception text or tokens.
 
 Check `/`, `/api/health`, and `/api/ready` after deployment. A direct callback visit
 without starting OAuth should return a readable HTTP 400, never a runtime crash.

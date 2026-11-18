@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 COLLECTION = 'deriv_oauth_connections'
 API_BASE = 'https://api.derivws.com'
-MAX_PROFIT_TRANSACTIONS = 100
+MAX_PROFIT_TRANSACTIONS = 500
 
 
 def save_connection(owner_id, connection):
@@ -219,7 +219,7 @@ def _performance_response(account, open_contracts, transactions):
     exposures = {}
     for row in open_contracts:
         contract_id = row.get('contract_id')
-        symbol = row.get('underlying') or row.get('symbol')
+        symbol = row.get('underlying') or row.get('symbol') or row.get('underlying_symbol')
         contract_type = row.get('contract_type')
         if not isinstance(contract_id, (str, int)) or not isinstance(symbol, str):
             raise ValueError('Invalid open contract')
@@ -253,7 +253,7 @@ def _performance_response(account, open_contracts, transactions):
         realized_total += profit
         closed.append({
             'contract_id': str(row.get('contract_id', '')),
-            'symbol': row.get('underlying') or row.get('symbol') or 'Unknown',
+            'symbol': row.get('underlying') or row.get('symbol') or row.get('underlying_symbol') or 'Unknown',
             'contract_type': row.get('contract_type') if isinstance(row.get('contract_type'), str) else 'UNKNOWN',
             'buy_price': str(buy_price),
             'sell_price': str(sell_price),
@@ -280,7 +280,7 @@ def _performance_response(account, open_contracts, transactions):
         'realized_transaction_count': len(closed),
         'realized_window': f'Up to the {MAX_PROFIT_TRANSACTIONS} most recent Deriv transactions',
         'realized_may_be_truncated': len(transactions) >= MAX_PROFIT_TRANSACTIONS,
-        'recent_closed': closed[:50],
+        'recent_closed': closed,
         'opposing_exposure': public_exposures,
         'exposure_note': 'Opposing positions are informational only and are not guaranteed to offset losses.',
         'observed_at': datetime.now(timezone.utc).isoformat(),

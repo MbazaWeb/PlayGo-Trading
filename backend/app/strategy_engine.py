@@ -40,6 +40,7 @@ BAND_PERIOD = 20
 BAND_STD_DEV = 2
 ATR_PERIOD = 14
 BREAKOUT_PERIOD = 20
+AUTO_MIN_CANDLES = 40
 
 
 def _hold(reason, bar_time=None):
@@ -148,12 +149,9 @@ def _breakout(candles, index):
     return "BUY" if close > highest else "SELL" if close < lowest else "HOLD"
 
 
-def evaluate_strategy(strategy_id, raw_candles):
-    """Evaluate one supported strategy on completed Deriv candles only."""
-    if strategy_id not in SUPPORTED_STRATEGY_IDS:
-        return _hold("Research-only strategy; no supported rule-based evaluator")
+def _prepare_candles(raw_candles):
     if not isinstance(raw_candles, list):
-        return _hold("Invalid candle data")
+        return None, "Invalid candle data"
 
     candles = []
     previous_epoch = 0
@@ -170,30 +168,49 @@ def evaluate_strategy(strategy_id, raw_candles):
                 or candle["high"] < max(candle["open"], candle["close"], candle["low"])
                 or candle["low"] > min(candle["open"], candle["close"], candle["high"])
             ):
-                return _hold("Invalid or unsorted closed candles")
+                return None, "Invalid or unsorted closed candles"
             candles.append({"epoch": epoch, **candle})
             previous_epoch = epoch
     except (KeyError, TypeError, ValueError, OverflowError):
-        return _hold("Invalid candle data")
+        return None, "Invalid candle data"
+    return candles, None
 
+
+def _minimum_candle_count(strategy_id):
     strategy_period = (
         SLOW_PERIOD * 2 if strategy_id == "triple-moving-average"
         else 34 if strategy_id == "macd-crossover"
         else 0
     )
-    if len(candles) < max(
+    return max(
         SLOW_PERIOD,
         BAND_PERIOD,
         BREAKOUT_PERIOD,
         RSI_PERIOD,
         ATR_PERIOD,
         strategy_period,
-    ) + 5:
+    ) + 5
+
+
+def _bar_time(candles):
+    try:
+        return datetime.fromtimestamp(candles[-1]["epoch"], timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def evaluate_strategy(strategy_id, raw_candles):
+    """Evaluate one supported strategy on completed Deriv candles only."""
+    if strategy_id not in SUPPORTED_STRATEGY_IDS:
+        return _hold("Research-only strategy; no supported rule-based evaluator")
+    candles, error = _prepare_candles(raw_candles)
+    if error:
+        return _hold(error)
+    if len(candles) < _minimum_candle_count(strategy_id):
         return _hold("Insufficient closed candles")
 
-    try:
-        bar_time = datetime.fromtimestamp(candles[-1]["epoch"], timezone.utc).isoformat()
-    except (OverflowError, OSError, ValueError):
+    bar_time = _bar_time(candles)
+    if bar_time is None:
         return _hold("Invalid candle timestamp")
 
     close = [item["close"] for item in candles]
@@ -321,4 +338,165 @@ def evaluate_strategy(strategy_id, raw_candles):
         ),
         "bar_time": bar_time,
         "ready": True,
+    }
+
+
+def _market_metrics(candles):
+    close = [item["close"] for item in candles]
+    index = len(close) - 1
+    fast = _ema(close, FAST_PERIOD)
+    slow = _ema(close, SLOW_PERIOD)
+    average_range = _atr(candles, ATR_PERIOD)
+    relative_strength = _rsi(close, RSI_PERIOD)
+    deviation = _stdev(close, BAND_PERIOD)
+    midpoint = _sma(close, BAND_PERIOD)
+    atr_values = [value for value in average_range[-20:] if value is not None]
+    if (
+        not atr_values
+        or average_range[index] is None
+        or average_range[index] <= 0
+        or relative_strength[index] is None
+    ):
+        return None
+    ordered_atr = sorted(atr_values)
+    middle = len(ordered_atr) // 2
+    median_atr = (
+        ordered_atr[middle]
+        if len(ordered_atr) % 2
+        else (ordered_atr[middle - 1] + ordered_atr[middle]) / 2
+    )
+    if median_atr <= 0:
+        return None
+
+    current_atr = average_range[index]
+    return {
+        "atr_percent": current_atr / close[index] * 100,
+        "volatility_ratio": current_atr / median_atr,
+        "trend_strength": abs(fast[index] - slow[index]) / current_atr,
+        "trend": "BUY" if fast[index] > slow[index] else "SELL",
+        "rsi": relative_strength[index],
+        "breakout": _breakout(candles, index),
+        "band_breakout": (
+            "BUY" if close[index] < midpoint[index] - BAND_STD_DEV * deviation[index]
+            else "SELL" if close[index] > midpoint[index] + BAND_STD_DEV * deviation[index]
+            else "HOLD"
+        ),
+    }
+
+
+def select_auto_strategy(raw_candles):
+    """Select a supported strategy only when the closed-candle regime is clear."""
+    candles, error = _prepare_candles(raw_candles)
+    if error:
+        return {
+            "strategy_id": None,
+            "reason": error,
+            "metrics": {},
+            "bar_time": None,
+            "ready": False,
+        }
+    if len(candles) < AUTO_MIN_CANDLES:
+        return {
+            "strategy_id": None,
+            "reason": "Insufficient closed candles for automatic regime selection.",
+            "metrics": {},
+            "bar_time": _bar_time(candles),
+            "ready": False,
+        }
+    bar_time = _bar_time(candles)
+    metrics = _market_metrics(candles)
+    if bar_time is None or metrics is None:
+        return {
+            "strategy_id": None,
+            "reason": "Market data is not stable enough for automatic strategy selection.",
+            "metrics": {},
+            "bar_time": bar_time,
+            "ready": False,
+        }
+
+    strategy_id = None
+    if metrics["volatility_ratio"] > 2.5:
+        reason = (
+            "Volatility filter: current ATR is more than 2.5 times its trailing median; "
+            "the agent is standing aside."
+        )
+    elif metrics["breakout"] != "HOLD":
+        strategy_id = "donchian-channel-breakout"
+        reason = "Closed price broke the prior 20-candle range; using the Donchian breakout rule."
+    elif metrics["trend_strength"] >= 0.35:
+        strategy_id = "trend-momentum-hybrid"
+        trend = "uptrend" if metrics["trend"] == "BUY" else "downtrend"
+        reason = (
+            f"EMA spread confirms a {trend} at {metrics['trend_strength']:.2f} ATR; "
+            "using the trend-momentum rule."
+        )
+    elif metrics["trend_strength"] <= 0.2 and (
+        metrics["rsi"] <= RSI_OVERSOLD or metrics["rsi"] >= RSI_OVERBOUGHT
+    ):
+        strategy_id = "rsi-oversold-overbought"
+        reason = "Weak trend with an RSI extreme; using the RSI reversal rule."
+    elif metrics["trend_strength"] <= 0.2 and metrics["band_breakout"] != "HOLD":
+        strategy_id = "bollinger-bands-reversion"
+        reason = "Weak trend with a two-standard-deviation band extreme; using band reversion."
+    else:
+        reason = "No clear trend, range extreme, or breakout; the agent is standing aside."
+
+    return {
+        "strategy_id": strategy_id,
+        "reason": reason,
+        "metrics": metrics,
+        "bar_time": bar_time,
+        "ready": True,
+    }
+
+
+def apply_manual_rules(decision, metrics, rules):
+    """Manual JSON rules may veto an automatic signal, but cannot create one."""
+    if decision.get("signal") not in {"BUY", "SELL"}:
+        return decision
+
+    signal = decision["signal"]
+    reasons = []
+    if signal not in rules.get("allow_signals", ["BUY", "SELL"]):
+        reasons.append(f"{signal} is not in allow_signals")
+    rsi = metrics.get("rsi")
+    if rules.get("min_rsi") is not None and (rsi is None or rsi < rules["min_rsi"]):
+        reasons.append("RSI is below min_rsi")
+    if rules.get("max_rsi") is not None and (rsi is None or rsi > rules["max_rsi"]):
+        reasons.append("RSI is above max_rsi")
+    atr_percent = metrics.get("atr_percent")
+    if (
+        rules.get("max_atr_percent") is not None
+        and (atr_percent is None or atr_percent > rules["max_atr_percent"])
+    ):
+        reasons.append("ATR percent exceeds max_atr_percent")
+    if not reasons:
+        return decision
+    return {
+        **decision,
+        "signal": "HOLD",
+        "reason": "Manual JSON rules blocked the automatic signal: " + "; ".join(reasons) + ".",
+    }
+
+
+def evaluate_auto_strategy(raw_candles):
+    """Select and evaluate one strategy, failing closed when no regime qualifies."""
+    selection = select_auto_strategy(raw_candles)
+    strategy_id = selection["strategy_id"]
+    if not strategy_id:
+        return {
+            "signal": "HOLD",
+            "reason": selection["reason"],
+            "bar_time": selection["bar_time"],
+            "ready": selection["ready"],
+            "strategy_id": None,
+            "strategy_selection_reason": selection["reason"],
+            "metrics": selection["metrics"],
+        }
+    decision = evaluate_strategy(strategy_id, raw_candles)
+    return {
+        **decision,
+        "strategy_id": strategy_id,
+        "strategy_selection_reason": selection["reason"],
+        "metrics": selection["metrics"],
     }

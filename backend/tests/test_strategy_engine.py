@@ -3,7 +3,10 @@ import unittest
 from app.strategy_engine import (
     DEFAULT_STRATEGY_ID,
     SUPPORTED_STRATEGY_IDS,
+    apply_manual_rules,
+    evaluate_auto_strategy,
     evaluate_strategy,
+    select_auto_strategy,
 )
 
 
@@ -71,6 +74,55 @@ class StrategyEngineTests(unittest.TestCase):
         invalid = evaluate_strategy(DEFAULT_STRATEGY_ID, candles)
         self.assertFalse(invalid["ready"])
         self.assertEqual(invalid["signal"], "HOLD")
+
+    def test_auto_selector_chooses_breakout_and_stands_aside_without_setup(self):
+        closes = [100] * 39 + [102]
+        breakout_candles = candles_for(closes)
+        breakout_candles[-1].update({"open": "101.5", "high": "102.1", "low": "101.4"})
+        selection = select_auto_strategy(breakout_candles)
+        self.assertEqual(selection["strategy_id"], "donchian-channel-breakout")
+
+        no_setup = select_auto_strategy(candles_for([100] * 40))
+        self.assertIsNone(no_setup["strategy_id"])
+        self.assertTrue(no_setup["ready"])
+        self.assertEqual(evaluate_auto_strategy(candles_for([100] * 40))["signal"], "HOLD")
+
+    def test_auto_selector_chooses_trend_momentum_in_a_confirmed_trend(self):
+        closes = [100 + 0.05 * index + [0, 0.3, 0.1, 0.2][index % 4] for index in range(60)]
+        decision = evaluate_auto_strategy(candles_for(closes))
+        self.assertEqual(decision["strategy_id"], "trend-momentum-hybrid")
+        self.assertEqual(decision["signal"], "BUY")
+
+    def test_auto_selector_skips_unusually_volatile_market(self):
+        candles = candles_for([100] * 40)
+        candles[-1]["high"] = "110"
+        candles[-1]["low"] = "90"
+        selection = select_auto_strategy(candles)
+        self.assertIsNone(selection["strategy_id"])
+        self.assertIn("Volatility filter", selection["reason"])
+
+    def test_manual_rules_can_only_veto_automatic_signals(self):
+        decision = {"signal": "BUY", "reason": "automatic", "bar_time": "2026-01-01T00:00:00+00:00"}
+        blocked = apply_manual_rules(
+            decision,
+            {"rsi": 55, "atr_percent": 0.1},
+            {"allow_signals": ["SELL"]},
+        )
+        self.assertEqual(blocked["signal"], "HOLD")
+        self.assertIn("blocked", blocked["reason"])
+
+        threshold_blocked = apply_manual_rules(
+            decision,
+            {"rsi": 49, "atr_percent": 0.1},
+            {"allow_signals": ["BUY", "SELL"], "min_rsi": 50},
+        )
+        self.assertEqual(threshold_blocked["signal"], "HOLD")
+
+        hold = {"signal": "HOLD", "reason": "no setup"}
+        self.assertEqual(
+            apply_manual_rules(hold, {}, {"allow_signals": ["BUY", "SELL"]}),
+            hold,
+        )
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ import psycopg
 import websockets
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.deriv_accounts import parse_accounts
 from app.deriv_market_data import DerivMarketDataError, parse_candles
@@ -24,7 +24,8 @@ from app.postgres_api import connect
 from app.strategy_engine import (
     DEFAULT_STRATEGY_ID,
     SUPPORTED_STRATEGY_IDS,
-    evaluate_strategy,
+    apply_manual_rules,
+    evaluate_auto_strategy,
 )
 
 router = APIRouter()
@@ -56,10 +57,32 @@ class DemoBotRequest(BaseModel):
     account_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+class ManualStrategyRules(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allow_signals: list[Literal["BUY", "SELL"]] = Field(
+        default_factory=lambda: ["BUY", "SELL"],
+        min_length=1,
+        max_length=2,
+    )
+    min_rsi: Optional[float] = Field(default=None, ge=0, le=100)
+    max_rsi: Optional[float] = Field(default=None, ge=0, le=100)
+    max_atr_percent: Optional[float] = Field(default=None, gt=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_rule_ranges(self):
+        if len(set(self.allow_signals)) != len(self.allow_signals):
+            raise ValueError("allow_signals cannot contain duplicate entries.")
+        if self.min_rsi is not None and self.max_rsi is not None and self.min_rsi > self.max_rsi:
+            raise ValueError("min_rsi cannot be greater than max_rsi.")
+        return self
+
+
 class DemoBotStartRequest(DemoBotRequest):
     symbol: Optional[str] = None
     contract_type: Optional[Literal["CALL_PUT", "CALL", "PUT"]] = None
     strategy_id: Optional[str] = None
+    manual_rules: ManualStrategyRules = Field(default_factory=ManualStrategyRules)
     duration_minutes: Optional[int] = Field(default=None, ge=1, le=60)
     stake: Optional[Decimal] = Field(default=None, ge=Decimal("0.35"), le=Decimal("100"))
     daily_stake_limit: Optional[Decimal] = Field(default=None, ge=Decimal("1"), le=Decimal("500"))
@@ -76,8 +99,8 @@ class DemoBotStartRequest(DemoBotRequest):
     @field_validator("strategy_id")
     @classmethod
     def validate_strategy(cls, value: Optional[str]) -> Optional[str]:
-        if value is not None and value not in SUPPORTED_STRATEGY_IDS:
-            raise ValueError("Strategy is unavailable for demo execution.")
+        if value is not None:
+            raise ValueError("Strategy selection is automatic; manual strategy IDs are not accepted.")
         return value
 
 
@@ -129,6 +152,13 @@ def _state_strategy_id(state):
     return value if isinstance(value, str) and value in SUPPORTED_STRATEGY_IDS else None
 
 
+def _state_manual_rules(state):
+    try:
+        return ManualStrategyRules.model_validate(state.get("manual_rules") or {})
+    except ValidationError:
+        raise HTTPException(503, "Saved manual rules are invalid. Review them before restarting.") from None
+
+
 def _account_document_id(account_id):
     return hashlib.sha256(account_id.encode()).hexdigest()
 
@@ -141,7 +171,10 @@ def _empty_state(account_id):
     return {
         "account_id": account_id,
         "symbol": SYMBOL,
-        "strategy_id": DEFAULT_STRATEGY_ID,
+        "strategy_mode": "auto",
+        "strategy_id": None,
+        "strategy_selection_reason": "Automatic strategy selection is waiting for completed candles.",
+        "manual_rules": ManualStrategyRules().model_dump(exclude_none=True),
         "contract_type": "CALL_PUT",
         "duration_minutes": DURATION_MINUTES,
         "stake": str(STAKE),
@@ -192,12 +225,11 @@ def _sync_run_record(cursor, account_id, state, *, session_id=None):
     if session_id is not None:
         if not isinstance(session_id, str) or not re.fullmatch(r"[0-9a-f]{64}", session_id):
             raise RuntimeError("Invalid Deriv session identifier")
-        strategy_id = _state_strategy_id(state)
-        if strategy_id is None:
-            raise RuntimeError("Invalid demo bot strategy")
         config = {
-            "strategy": "EMA_9_21_CROSS" if strategy_id == DEFAULT_STRATEGY_ID else strategy_id.upper().replace("-", "_"),
-            "strategy_id": strategy_id,
+            "strategy": "AUTO_SELECT",
+            "strategy_mode": "auto",
+            "strategy_id": _state_strategy_id(state),
+            "manual_rules": _state_manual_rules(state).model_dump(exclude_none=True),
             "execution": "DEMO_ONLY",
             "symbol": _state_symbol(state),
             "contract_type": _state_contract_type(state),
@@ -285,12 +317,10 @@ def _public_state(state):
     return {
         "execution": "DEMO_ONLY",
         **state,
-        "strategy": (
-            "EMA_9_21_CROSS"
-            if strategy_id == DEFAULT_STRATEGY_ID
-            else strategy_id.upper().replace("-", "_") if strategy_id else "INVALID"
-        ),
+        "strategy": "AUTO_SELECT",
+        "strategy_mode": "auto",
         "strategy_id": strategy_id,
+        "manual_rules": _state_manual_rules(state).model_dump(exclude_none=True),
         "trade_activity": state.get("trade_activity", []),
         "symbol": _state_symbol(state),
         "contract_type": _state_contract_type(state),
@@ -388,6 +418,8 @@ def _record_trade_activity(state, status, contract_id=None):
         "stake": pending.get("stake", str(_state_stake(state))),
         "status": status,
         "contract_id": contract_id,
+        "strategy_id": pending.get("strategy_id"),
+        "strategy_selection_reason": pending.get("strategy_selection_reason"),
     })
 
 
@@ -404,6 +436,12 @@ def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL, balan
             state["last_signal"] = decision.get("signal", "HOLD")
             state["last_signal_reason"] = decision.get("reason", "No strategy decision.")
             state["last_signal_at"] = decision.get("bar_time")
+            state["strategy_mode"] = "auto"
+            state["strategy_id"] = decision.get("strategy_id")
+            state["strategy_selection_reason"] = decision.get(
+                "strategy_selection_reason",
+                "Automatic strategy selection is unavailable.",
+            )
         if state["pending_trade"]:
             pending_at = state["pending_trade"].get("created_at", 0)
             if now - pending_at > 120:
@@ -459,6 +497,8 @@ def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL, balan
             "candle_epoch": candle_epoch,
             "created_at": now,
             "stage": "proposal",
+            "strategy_id": state.get("strategy_id"),
+            "strategy_selection_reason": state.get("strategy_selection_reason"),
         }
         state["last_error"] = None
         _record_trade_activity(state, "Trade initiated")
@@ -608,12 +648,6 @@ async def start_demo_bot(payload: DemoBotStartRequest, authorization: str = Head
             next_contract_type = (
                 payload.contract_type if payload.contract_type is not None else _state_contract_type(state)
             )
-            current_strategy_id = _state_strategy_id(state)
-            if current_strategy_id is None:
-                raise HTTPException(503, "Saved demo bot strategy is invalid.")
-            next_strategy_id = (
-                payload.strategy_id if payload.strategy_id is not None else current_strategy_id
-            )
             next_duration = (
                 payload.duration_minutes if payload.duration_minutes is not None else _state_duration(state)
             )
@@ -635,11 +669,13 @@ async def start_demo_bot(payload: DemoBotStartRequest, authorization: str = Head
                 state["last_processed_epoch"] = 0
 
             state["symbol"] = next_symbol
-            if next_strategy_id != current_strategy_id:
-                state["last_signal"] = "HOLD"
-                state["last_signal_reason"] = "Strategy selected; waiting for the next completed candle."
-                state["last_signal_at"] = None
-            state["strategy_id"] = next_strategy_id
+            state["strategy_mode"] = "auto"
+            state["strategy_id"] = None
+            state["strategy_selection_reason"] = "Automatic strategy selection is waiting for completed candles."
+            state["last_signal"] = "HOLD"
+            state["last_signal_reason"] = "Waiting for a completed candle and a qualifying market regime."
+            state["last_signal_at"] = None
+            state["manual_rules"] = payload.manual_rules.model_dump(exclude_none=True)
             state["contract_type"] = next_contract_type
             state["duration_minutes"] = next_duration
             state["stake"] = format(next_stake, "f")
@@ -780,6 +816,8 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
                     state["status"] = "waiting_for_market"
                     state["last_signal"] = "HOLD"
                     state["last_signal_reason"] = "Waiting for a completed candle."
+                    state["strategy_id"] = None
+                    state["strategy_selection_reason"] = "Automatic strategy selection needs a completed candle."
                 return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
             latest = completed[-1]
             if now - (latest["epoch"] + GRANULARITY) > MAX_CANDLE_AGE:
@@ -787,14 +825,9 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
                     state["last_cycle_at"] = datetime.now(timezone.utc).isoformat()
                     state["status"] = "waiting_for_market"
                 return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
-            strategy_id = _state_strategy_id(initial)
-            if strategy_id is None:
-                with _locked_state(payload.account_id) as state:
-                    state["running"] = False
-                    state["status"] = "feed_error"
-                    state["last_error"] = "The saved strategy is unsupported. Select a supported strategy before restarting."
-                return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
-            decision = evaluate_strategy(strategy_id, completed)
+            decision = evaluate_auto_strategy(completed)
+            rules = _state_manual_rules(initial).model_dump(exclude_none=True)
+            decision = apply_manual_rules(decision, decision.get("metrics", {}), rules)
             side = decision["signal"] if decision["signal"] in {"BUY", "SELL"} else None
             state, reserved = _reserve_signal(
                 payload.account_id,

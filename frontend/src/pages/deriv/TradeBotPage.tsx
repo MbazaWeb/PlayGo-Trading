@@ -114,7 +114,7 @@ export default function TradeBotPage({
             <div>
               <h2>Deriv demo bot</h2>
               <p>
-                {selectedStrategyName ?? 'EMA Crossover'} · {activePairLabel} · {activeDuration}-minute Rise/Fall
+                {selectedStrategyName ?? 'Automatic strategy selection'} · {activePairLabel} · {activeDuration}-minute Rise/Fall
               </p>
             </div>
             <div className="botHeaderBadges">
@@ -343,7 +343,9 @@ export default function TradeBotPage({
               ? 'Select a demo account to access the demo bot. Real-account trading is disabled.'
               : 'Select a verified demo account to access the demo bot.'}
           </p>
-          <p className="demoBotCopy">Selected agent strategy: {selectedStrategyName ?? 'EMA Crossover'}.</p>
+          <p className="demoBotCopy">
+            Strategy mode: {selectedStrategyName ?? 'automatic selection based on market conditions'}.
+          </p>
           {!derivSession && (
             <button className="realPrimary" disabled={oauthBusy} onClick={onSignInDeriv}>
               {oauthBusy ? 'Connecting...' : 'Sign in with Deriv'}

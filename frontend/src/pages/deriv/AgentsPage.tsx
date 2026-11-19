@@ -2,15 +2,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import '../../styles/agents.css';
 import { AGENT_PROMPT } from '../../data/agentPrompt';
 import { Account, DemoBotState, Snapshot } from '../../types/trading';
-import { DEFAULT_STRATEGY_ID, isSupportedStrategy, strategies, SUPPORTED_STRATEGY_IDS } from '../../../strategy';
+import { getStrategy } from '../../../strategy';
+import {
+  DEFAULT_MANUAL_RULES_JSON,
+  parseManualRulesJson,
+} from '../../../strategy/manualRules';
 
 type Props = {
   load: (path: string) => Promise<unknown>;
   data: Snapshot | null;
   selected: Account | undefined;
   botState: DemoBotState | null;
-  selectedStrategyId?: string;
-  onStrategyChange?: (id: string) => void;
+  manualRulesJson?: string;
+  onManualRulesChange?: (value: string) => void;
 };
 
 type Performance = {
@@ -48,22 +52,18 @@ export default function AgentsPage({
   data,
   selected,
   botState,
-  selectedStrategyId,
-  onStrategyChange,
+  manualRulesJson,
+  onManualRulesChange,
 }: Props) {
   const [perf, setPerf] = useState<Performance | null>(null);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
-  const [previewStrategyId, setPreviewStrategyId] = useState(DEFAULT_STRATEGY_ID);
+  const [previewRulesJson, setPreviewRulesJson] = useState(DEFAULT_MANUAL_RULES_JSON);
   const accountId = data?.connected ? selected?.account_id : undefined;
-  const supportedIds = new Set<string>(SUPPORTED_STRATEGY_IDS);
-  const strategyId = selectedStrategyId && isSupportedStrategy(selectedStrategyId)
-    ? selectedStrategyId
-    : previewStrategyId;
-  const selectedStrategy = strategies.find((strategy) => strategy.id === strategyId)
-    ?? strategies.find((strategy) => strategy.id === DEFAULT_STRATEGY_ID)!;
-  const activeStrategy = strategies.find((strategy) => strategy.id === botState?.strategy_id)
-    ?? selectedStrategy;
+  const rulesText = manualRulesJson ?? previewRulesJson;
+  const rulesResult = useMemo(() => parseManualRulesJson(rulesText), [rulesText]);
+  const activeStrategy = botState?.strategy_id ? getStrategy(botState.strategy_id) : undefined;
+  const strategyLabel = activeStrategy?.name ?? (botState?.running ? 'No qualifying setup' : 'Auto-select on start');
 
   useEffect(() => {
     if (!accountId) { setPerf(null); return; }
@@ -122,10 +122,10 @@ export default function AgentsPage({
     { name: 'Research', badge: 'Partial', tone: 'partial', note: 'Offline breakout backtest only. No live research feed or news.',
       metric: 'Mode: offline' },
     { name: 'Strategy & Trade', badge: botState?.running ? 'Live (demo)' : 'Demo only', tone: 'live',
-      note: `${botState?.running ? activeStrategy.name : selectedStrategy.name} uses closed 5-minute candles. Not validated as profitable.`,
+      note: `${strategyLabel} uses closed 5-minute candles. Strategy selection is heuristic, not validated as profitable.`,
       metric: botState
-        ? `${botState.last_signal ?? 'HOLD'} · ${botState.symbol} · ${botState.contract_type} · ${botState.duration_minutes}m`
-        : `${selectedStrategy.name} · waiting for demo bot` },
+        ? `${botState.last_signal ?? 'HOLD'} · ${strategyLabel} · ${botState.symbol} · ${botState.duration_minutes}m`
+        : 'Automatic selection · waiting for demo bot' },
     { name: 'Risk', badge: 'Partial', tone: 'partial', note: 'Stake cap and daily stake limit. Loss-based auto-stop not built yet.',
       metric: botState ? `Budget ${used.toFixed(2)} / ${limit.toFixed(2)}` : 'n/a' },
     { name: 'Investments', badge: 'Partial', tone: 'partial', note: 'Demo balance and stake sizing only. No portfolio allocation logic.',
@@ -162,50 +162,17 @@ export default function AgentsPage({
       </section>
 
       <section className="agentsPanel agentStrategyPanel">
-        <h2>Decision strategy <small>Demo bot only</small></h2>
+        <h2>Automatic strategy selection <small>Demo bot only</small></h2>
         <p>
-          Choose which supported strategy the agent evaluates on each new, closed Deriv 5-minute candle.
-          Changing this selection does not place a trade; starting the demo bot is still an explicit action.
+          On each new closed five-minute candle, the agent evaluates trend, range extremes, breakouts, and volatility,
+          then selects a supported rule or stands aside. The selector is a heuristic and cannot guarantee profit.
         </p>
-        <label className="agentStrategyLabel" htmlFor="agent-strategy">
-          Strategy
-          <select
-            id="agent-strategy"
-            value={selectedStrategy.id}
-            disabled={Boolean(botState?.running)}
-            onChange={(event) => {
-              const nextId = event.currentTarget.value;
-              if (!isSupportedStrategy(nextId)) return;
-              if (onStrategyChange) onStrategyChange(nextId);
-              else setPreviewStrategyId(nextId);
-            }}
-          >
-            <optgroup label={`Available rule-based strategies (${SUPPORTED_STRATEGY_IDS.length})`}>
-              {strategies.filter((strategy) => supportedIds.has(strategy.id)).map((strategy) => (
-                <option key={strategy.id} value={strategy.id}>
-                  {strategy.category} — {strategy.name}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label={`Research only — not implemented (${strategies.length - supportedIds.size})`}>
-              {strategies.filter((strategy) => !supportedIds.has(strategy.id)).map((strategy) => (
-                <option key={strategy.id} value={strategy.id} disabled>
-                  {strategy.category} — {strategy.name}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-        </label>
-
         <div className="agentStrategyDetails">
           <div>
-            <strong>{botState?.running ? activeStrategy.name : selectedStrategy.name}</strong>
+            <strong>{strategyLabel}</strong>
             <small>
-              {!onStrategyChange
-                ? 'Preview only. Open Agents inside the signed-in Deriv workspace to apply a strategy to the demo bot.'
-                : botState?.running
-                ? 'Running strategy. Stop the bot before changing it.'
-                : 'The next explicit demo-bot start will use this strategy.'}
+              {botState?.strategy_selection_reason
+                ?? 'Start the demo bot to evaluate market conditions and see the selected strategy.'}
             </small>
           </div>
           {botState ? (
@@ -218,12 +185,35 @@ export default function AgentsPage({
               {botState.last_signal_at && <time>{new Date(botState.last_signal_at).toLocaleString()}</time>}
             </div>
           ) : (
-            <p className="agentsHint">Start the demo bot to see its strategy decisions here.</p>
+            <p className="agentsHint">Start the demo bot to see its automatic strategy decisions here.</p>
           )}
         </div>
         <p className="agentsHint">
-          The supplied catalog has 50 entries; only 24 currently have rule-based evaluators. The remaining 26 stay
-          disabled until implemented. Signals are research rules, not profit guarantees; real-money routing remains locked.
+          The selector currently chooses among four of the 24 supported evaluators. It stands aside for unclear regimes
+          or unusually high volatility; the other 26 catalog entries remain research-only. All execution remains demo-only.
+        </p>
+
+        <label className="agentStrategyLabel" htmlFor="manual-strategy-rules">
+          Manual rule filters (JSON)
+          <textarea
+            id="manual-strategy-rules"
+            className="agentRulesEditor"
+            value={rulesText}
+            rows={8}
+            spellCheck={false}
+            disabled={Boolean(botState?.running)}
+            onChange={(event) => {
+              const next = event.currentTarget.value;
+              if (onManualRulesChange) onManualRulesChange(next);
+              else setPreviewRulesJson(next);
+            }}
+          />
+        </label>
+        {!rulesResult.ok && <p className="agentsError" role="alert">{rulesResult.error}</p>}
+        <p className="agentsHint">
+          Rules may limit BUY/SELL signals, RSI, and maximum ATR percent. They only veto the automatic signal; they
+          cannot choose a strategy, force a trade, or execute code. Valid rules are saved on the next explicit demo-bot start.
+          {onManualRulesChange ? '' : ' This standalone page is a preview; sign in through the Deriv workspace to apply rules.'}
         </p>
       </section>
 
@@ -234,7 +224,11 @@ export default function AgentsPage({
             {activity.slice(0, 12).map((t, i) => (
               <li key={(t.contract_id ?? t.initiated_at) + String(i)} className="agentFeedItem">
                 <span className={'agentSide ' + (t.side === 'BUY' ? 'up' : 'down')}>{t.side === 'BUY' ? 'CALL' : 'PUT'}</span>
-                <span>{t.symbol}</span><span>stake {t.stake}</span>
+                <span>{t.symbol}</span>
+                <span title={t.strategy_selection_reason ?? ''}>
+                  {getStrategy(t.strategy_id ?? '')?.name ?? 'Automatic strategy'}
+                </span>
+                <span>stake {t.stake}</span>
                 <span className="agentStatus">{t.status}</span><time>{t.time}</time>
               </li>
             ))}

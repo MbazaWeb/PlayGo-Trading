@@ -12,7 +12,8 @@ import {
   Snapshot,
 } from './types/trading';
 import { API, HANDOFF_KEY, SESSION_KEY, getPageFromPath, randomSecret } from './services/api';
-import { DEFAULT_STRATEGY_ID, getStrategy, isSupportedStrategy } from '../strategy';
+import { getStrategy } from '../strategy';
+import { DEFAULT_MANUAL_RULES_JSON, parseManualRulesJson } from '../strategy/manualRules';
 import Navbar from './components/Navbar';
 import NotificationPanel from './components/NotificationPanel';
 import AccountPage from './pages/deriv/AccountPage';
@@ -36,7 +37,8 @@ export default function AccountWorkspace() {
   const [botState, setBotState] = useState<DemoBotState | null>(null);
   const [botBusy, setBotBusy] = useState(false);
   const [botError, setBotError] = useState('');
-  const [strategyId, setStrategyId] = useState(DEFAULT_STRATEGY_ID);
+  const [manualRulesJson, setManualRulesJson] = useState(DEFAULT_MANUAL_RULES_JSON);
+  const manualRulesDirtyRef = useRef(false);
 
   // Notification Logs State
   const [notifications, setNotifications] = useState<NotificationLog[]>(() => {
@@ -100,12 +102,11 @@ export default function AccountWorkspace() {
     data?.accounts.find((account) => account.account_id === selectedId) ??
     data?.accounts.find((account) => account.account_type === (derivSession ? 'demo' : 'real')) ??
     data?.accounts[0];
-  const selectedStrategyName = getStrategy(strategyId)?.name ?? 'EMA Crossover';
-
+  const selectedBotState = botState?.account_id === selected?.account_id ? botState : null;
   const acceptBotState = useCallback((state: DemoBotState) => {
     setBotState(state);
-    if (state.account_id === selected?.account_id && state.strategy_id && isSupportedStrategy(state.strategy_id)) {
-      setStrategyId(state.strategy_id);
+    if (state.account_id === selected?.account_id && state.manual_rules && !manualRulesDirtyRef.current) {
+      setManualRulesJson(JSON.stringify(state.manual_rules, null, 2));
     }
   }, [selected?.account_id]);
 
@@ -446,6 +447,11 @@ export default function AccountWorkspace() {
 
   async function botAction(action: 'start' | 'stop', config?: BotConfig) {
     if (!selected || selected.account_type !== 'demo') return;
+    const parsedRules = action === 'start' ? parseManualRulesJson(manualRulesJson) : null;
+    if (parsedRules && !parsedRules.ok) {
+      setBotError(parsedRules.error);
+      return;
+    }
     setBotBusy(true);
     setBotError('');
     try {
@@ -455,7 +461,7 @@ export default function AccountWorkspace() {
         body: JSON.stringify({
           account_id: selected.account_id,
           ...(config || {}),
-          ...(action === 'start' ? { strategy_id: strategyId } : {}),
+          ...(parsedRules?.ok ? { manual_rules: parsedRules.rules } : {}),
         }),
       });
       const body = await response.json();
@@ -471,6 +477,8 @@ export default function AccountWorkspace() {
       }
 
       if (action === 'start') {
+        manualRulesDirtyRef.current = false;
+        if (parsedRules?.ok) setManualRulesJson(JSON.stringify(parsedRules.rules, null, 2));
         pushNotification(
           'bot',
           'BOT STARTED',
@@ -673,8 +681,14 @@ export default function AccountWorkspace() {
         <TradeBotPage
           derivSession={derivSession}
           selected={selected}
-          botState={botState?.account_id === selected?.account_id ? botState : null}
-          selectedStrategyName={selectedStrategyName}
+          botState={selectedBotState}
+          selectedStrategyName={
+            selectedBotState?.strategy_id
+              ? getStrategy(selectedBotState.strategy_id)?.name ?? 'No qualifying setup'
+              : selectedBotState?.running
+                ? 'Standing by for a setup'
+                : 'Automatic strategy selection'
+          }
           botBusy={botBusy}
           botError={botError}
           oauthBusy={oauthBusy}
@@ -704,10 +718,11 @@ export default function AccountWorkspace() {
           load={loadMarkets}
           data={data}
           selected={selected}
-          botState={botState?.account_id === selected?.account_id ? botState : null}
-          selectedStrategyId={strategyId}
-          onStrategyChange={(id) => {
-            if (isSupportedStrategy(id)) setStrategyId(id);
+          botState={selectedBotState}
+          manualRulesJson={manualRulesJson}
+          onManualRulesChange={(value) => {
+            manualRulesDirtyRef.current = true;
+            setManualRulesJson(value);
           }}
         />
       )}

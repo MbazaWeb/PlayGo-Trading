@@ -1,3 +1,5 @@
+import type { ManualStrategyRules } from '../../strategy/manualRules';
+
 export type DashboardPage = 'account' | 'market' | 'trade-bot' | 'pnl-hedge' | 'agents';
 
 export const DASHBOARD_PATHS: Record<DashboardPage, string> = {
@@ -41,7 +43,10 @@ export type BotConfig = {
 export type DemoBotState = {
   execution: 'DEMO_ONLY';
   strategy: string;
+  strategy_mode?: 'auto';
   strategy_id?: string | null;
+  strategy_selection_reason?: string;
+  manual_rules?: ManualStrategyRules;
   symbol: string;
   contract_type: string;
   duration_minutes: number;
@@ -63,6 +68,8 @@ export type DemoBotState = {
     stake: string;
     status: string;
     contract_id: string | null;
+    strategy_id?: string | null;
+    strategy_selection_reason?: string;
   }[];
   last_trade: {
     contract_id: string;

@@ -138,11 +138,15 @@ class DemoBotStateTests(unittest.TestCase):
                 "signal": "HOLD",
                 "reason": "Conditions not met",
                 "bar_time": "2026-01-01T00:00:00+00:00",
+                "strategy_id": None,
+                "strategy_selection_reason": "No clear market regime",
             },
         )
         self.assertFalse(reserved)
         self.assertEqual(state["last_signal"], "HOLD")
         self.assertEqual(state["last_signal_reason"], "Conditions not met")
+        self.assertIsNone(state["strategy_id"])
+        self.assertEqual(state["strategy_selection_reason"], "No clear market regime")
         self.assertEqual(state["daily_stake"], "0")
 
     def test_trade_activity_records_initiation_submission_and_confirmed_contract(self):
@@ -214,11 +218,13 @@ class DemoBotStateTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["running"])
         self.assertEqual(response.json()["execution"], "DEMO_ONLY")
+        self.assertEqual(response.json()["strategy_mode"], "auto")
+        self.assertIsNone(response.json()["strategy_id"])
+        self.assertEqual(response.json()["manual_rules"]["allow_signals"], ["BUY", "SELL"])
         self.assertEqual(response.json()["stake"], "2")
         self.assertEqual(response.json()["daily_stake_limit"], "5")
-        self.assertEqual(response.json()["strategy_id"], "ema-crossover")
 
-    def test_start_uses_a_selected_supported_strategy(self):
+    def test_start_saves_manual_json_filters_without_overriding_auto_selection(self):
         app = FastAPI()
         app.include_router(bot.router)
         client = TestClient(app)
@@ -228,21 +234,53 @@ class DemoBotStateTests(unittest.TestCase):
              patch.object(bot, "_locked_state", side_effect=self.lock_context):
             response = client.post(
                 "/api/deriv/demo-bot/start",
-                json={"account_id": "DOT123", "strategy_id": "rsi-momentum"},
+                json={
+                    "account_id": "DOT123",
+                    "manual_rules": {"allow_signals": ["BUY"], "min_rsi": 50},
+                },
                 headers={"Authorization": "Bearer deriv_" + "a" * 64},
             )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["strategy_id"], "rsi-momentum")
-        self.assertEqual(self.state["strategy_id"], "rsi-momentum")
+        self.assertEqual(response.json()["strategy_mode"], "auto")
+        self.assertIsNone(response.json()["strategy_id"])
+        self.assertEqual(response.json()["manual_rules"], {"allow_signals": ["BUY"], "min_rsi": 50.0})
+        self.assertEqual(self.state["manual_rules"]["allow_signals"], ["BUY"])
 
-    def test_start_rejects_research_only_strategies(self):
+    def test_start_rejects_manual_strategy_override(self):
         app = FastAPI()
         app.include_router(bot.router)
         client = TestClient(app)
         with patch.object(bot, "_deriv_connection") as get_connection:
             response = client.post(
                 "/api/deriv/demo-bot/start",
-                json={"account_id": "DOT123", "strategy_id": "supertrend"},
+                json={"account_id": "DOT123", "strategy_id": "ema-crossover"},
+            )
+        self.assertEqual(response.status_code, 422)
+        get_connection.assert_not_called()
+
+    def test_start_rejects_unsupported_manual_rule_fields(self):
+        app = FastAPI()
+        app.include_router(bot.router)
+        client = TestClient(app)
+        with patch.object(bot, "_deriv_connection") as get_connection:
+            response = client.post(
+                "/api/deriv/demo-bot/start",
+                json={"account_id": "DOT123", "manual_rules": {"python": "buy()"}},
+            )
+        self.assertEqual(response.status_code, 422)
+        get_connection.assert_not_called()
+
+    def test_start_rejects_reversed_manual_rsi_bounds(self):
+        app = FastAPI()
+        app.include_router(bot.router)
+        client = TestClient(app)
+        with patch.object(bot, "_deriv_connection") as get_connection:
+            response = client.post(
+                "/api/deriv/demo-bot/start",
+                json={
+                    "account_id": "DOT123",
+                    "manual_rules": {"min_rsi": 70, "max_rsi": 30},
+                },
             )
         self.assertEqual(response.status_code, 422)
         get_connection.assert_not_called()
@@ -365,8 +403,10 @@ class DemoBotLedgerTests(unittest.TestCase):
         config = json.loads(cursor.params[2])
         self.assertIn("insert into playgo_private.bot_runs", cursor.query)
         self.assertEqual(cursor.params[:2], (session_id, "DOT123"))
-        self.assertEqual(config["strategy"], "EMA_9_21_CROSS")
-        self.assertEqual(config["strategy_id"], "ema-crossover")
+        self.assertEqual(config["strategy"], "AUTO_SELECT")
+        self.assertEqual(config["strategy_mode"], "auto")
+        self.assertIsNone(config["strategy_id"])
+        self.assertEqual(config["manual_rules"]["allow_signals"], ["BUY", "SELL"])
         self.assertEqual(config["execution"], "DEMO_ONLY")
         self.assertEqual(config["stake"], "2")
         self.assertEqual(state["run_id"], "a3d8e602-621c-4bd0-8ff1-543d9f9e139f")

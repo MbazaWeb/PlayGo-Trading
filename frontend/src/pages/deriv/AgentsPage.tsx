@@ -9,8 +9,8 @@ type Props = {
   data: Snapshot | null;
   selected: Account | undefined;
   botState: DemoBotState | null;
-  selectedStrategyId: string;
-  onStrategyChange: (id: string) => void;
+  selectedStrategyId?: string;
+  onStrategyChange?: (id: string) => void;
 };
 
 type Performance = {
@@ -54,9 +54,13 @@ export default function AgentsPage({
   const [perf, setPerf] = useState<Performance | null>(null);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [previewStrategyId, setPreviewStrategyId] = useState(DEFAULT_STRATEGY_ID);
   const accountId = data?.connected ? selected?.account_id : undefined;
   const supportedIds = new Set<string>(SUPPORTED_STRATEGY_IDS);
-  const selectedStrategy = strategies.find((strategy) => strategy.id === selectedStrategyId)
+  const strategyId = selectedStrategyId && isSupportedStrategy(selectedStrategyId)
+    ? selectedStrategyId
+    : previewStrategyId;
+  const selectedStrategy = strategies.find((strategy) => strategy.id === strategyId)
     ?? strategies.find((strategy) => strategy.id === DEFAULT_STRATEGY_ID)!;
   const activeStrategy = strategies.find((strategy) => strategy.id === botState?.strategy_id)
     ?? selectedStrategy;
@@ -171,7 +175,9 @@ export default function AgentsPage({
             disabled={Boolean(botState?.running)}
             onChange={(event) => {
               const nextId = event.currentTarget.value;
-              if (isSupportedStrategy(nextId)) onStrategyChange(nextId);
+              if (!isSupportedStrategy(nextId)) return;
+              if (onStrategyChange) onStrategyChange(nextId);
+              else setPreviewStrategyId(nextId);
             }}
           >
             <optgroup label={`Available rule-based strategies (${SUPPORTED_STRATEGY_IDS.length})`}>
@@ -195,7 +201,9 @@ export default function AgentsPage({
           <div>
             <strong>{botState?.running ? activeStrategy.name : selectedStrategy.name}</strong>
             <small>
-              {botState?.running
+              {!onStrategyChange
+                ? 'Preview only. Open Agents inside the signed-in Deriv workspace to apply a strategy to the demo bot.'
+                : botState?.running
                 ? 'Running strategy. Stop the bot before changing it.'
                 : 'The next explicit demo-bot start will use this strategy.'}
             </small>

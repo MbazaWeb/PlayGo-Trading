@@ -142,4 +142,33 @@
   .realWorkspace .realHero > button {
     margin-left: auto;
   }
+
+  .realWorkspace .dashboardSubnav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    overflow: visible;
+  }
+
+  .realWorkspace .dashboardSubnav a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 8px 6px;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .realWorkspace .dashboardSubnav a:nth-child(4) {
+    grid-column: span 2;
+  }
+}
+
+.realWorkspace .demoBotPanel button:not(.realPrimary):not(.botConfigToggle) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
 }

@@ -1,6 +1,6 @@
 # Vercel deployment and Deriv OAuth
 
-Production uses two Git-connected Vercel projects. The frontend project builds `frontend/` and rewrites dashboard paths to the SPA entry point via `frontend/vercel.json`. The API project builds `backend/` and serves `app/index.py`, which registers the Deriv routes on the PostgreSQL API.
+Production uses two Vercel projects. The frontend project builds `frontend/` and rewrites dashboard paths to the SPA entry point via `frontend/vercel.json`. The API project builds `backend/`; Vercel's FastAPI preset selects `main.py`, which imports `app.index:app` to register the Deriv routes on the PostgreSQL API.
 
 ## Environment
 

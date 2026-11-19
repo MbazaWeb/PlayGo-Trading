@@ -1,13 +1,14 @@
 import { DASHBOARD_PATHS, DashboardPage } from '../types/trading';
 
-const configuredApi = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
+const nextApi = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_API_URL || '' : '';
+const configuredApi = (nextApi || import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
 export const API =
   configuredApi ||
   (['localhost', '127.0.0.1'].includes(window.location.hostname)
     ? 'http://127.0.0.1:8001'
     : 'https://playgo-ai-trading-api.vercel.app');
 
-export const SESSION_KEY = 'playgo_owner_session';
+export const SESSION_KEY = 'playgo_deriv_session';
 export const HANDOFF_KEY = 'playgo_deriv_signin_handoff';
 export const TRADE_AMOUNT_KEY = 'playgo_paper_trade_amount_usd';
 

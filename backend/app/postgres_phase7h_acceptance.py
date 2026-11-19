@@ -7,7 +7,6 @@ import argparse
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 from app import postgres_deployment_preflight as preflight
 from app import postgres_phase7g_final_review as review
@@ -43,24 +42,8 @@ def main(argv=None):
     for note in notes:
         print("NOTE: " + note)
     print("CHECK: running offline regression suites")
-    backend_dir = Path(__file__).resolve().parents[1]
-    tests_dir = backend_dir / "tests"
-
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        filter(None, [
-            str(tests_dir),
-            str(backend_dir),
-            env.get("PYTHONPATH", ""),
-        ])
-    )
-
-    result = subprocess.run(
-        [sys.executable, "-m", "unittest", "-v", *SUITES],
-        cwd=backend_dir,
-        env=env,
-        check=False,
-    )
+    result = subprocess.run([sys.executable, "-m", "unittest", "-v", *SUITES],
+                            check=False)
     if result.returncode != 0:
         print("FAIL: Phase 7H.4 regression suites")
         return 1

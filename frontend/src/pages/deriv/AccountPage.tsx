@@ -6,19 +6,13 @@ type Props = {
   token: string;
   oauthBusy: boolean;
   busy: boolean;
-  signingIn: boolean;
   data: Snapshot | null;
   selected: Account | undefined;
   selectedId: string;
   error: string;
-  username: string;
-  password: string;
   onSelectId: (id: string) => void;
   onRefresh: () => void;
   onSignInDeriv: () => void;
-  onOwnerLogin: (e: React.FormEvent) => void;
-  onUsernameChange: (val: string) => void;
-  onPasswordChange: (val: string) => void;
 };
 
 function balanceLabel(account: Account) {
@@ -35,19 +29,13 @@ export default function AccountPage({
   token,
   oauthBusy,
   busy,
-  signingIn,
   data,
   selected,
   selectedId,
   error,
-  username,
-  password,
   onSelectId,
   onRefresh,
   onSignInDeriv,
-  onOwnerLogin,
-  onUsernameChange,
-  onPasswordChange,
 }: Props) {
   return (
     <div className="independentPage">
@@ -101,31 +89,6 @@ export default function AccountPage({
           <small className="derivLoginHelp">
             Sign in securely on Deriv, then return here automatically. Your Deriv password stays with Deriv.
           </small>
-          <details className="ownerLogin">
-            <summary>PlayGo owner sign-in</summary>
-            <form onSubmit={onOwnerLogin}>
-              <label>
-                Username
-                <input
-                  required
-                  autoComplete="username"
-                  value={username}
-                  onChange={(e) => onUsernameChange(e.target.value)}
-                />
-              </label>
-              <label>
-                Password
-                <input
-                  required
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => onPasswordChange(e.target.value)}
-                />
-              </label>
-              <button disabled={signingIn}>{signingIn ? 'Signing in...' : 'Sign in as owner'}</button>
-            </form>
-          </details>
         </section>
       ) : busy && !data ? (
         <p role="status" className="realEmpty">

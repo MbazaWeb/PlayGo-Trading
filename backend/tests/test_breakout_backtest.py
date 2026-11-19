@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from app.breakout_backtest import BacktestInputError, backtest_breakout
@@ -33,6 +34,37 @@ def sample_candles():
 
 
 class BreakoutBacktestTests(unittest.TestCase):
+    def test_deterministic_replay_preserves_finalized_trade_under_future_extension(self):
+        candles = sample_candles()
+        candles[-1]["high"] = "1.10200"
+        persisted_input = json.dumps({"candles": candles, "pair": "EURUSD", "lookback": 5})
+        result = backtest_breakout(**json.loads(persisted_input))
+        replay = backtest_breakout(**json.loads(persisted_input))
+        self.assertEqual(replay, result)
+        self.assertEqual(result["trades"], [{
+            "side": "BUY",
+            "entry_epoch": 1_800_001_800,
+            "exit_epoch": 1_800_001_800,
+            "entry_price": "1.10030",
+            "exit_price": "1.101140",
+            "units": 4544,
+            "gross_pnl": "3.82",
+            "estimated_costs": "0.32",
+            "net_pnl": "3.50",
+            "exit_reason": "TARGET",
+        }])
+        self.assertEqual(result["metrics"]["ending_balance"], "10003.50")
+
+        extended = [*candles, {
+            "epoch": candles[-1]["epoch"] + 300,
+            "open": "1.10070",
+            "high": "1.10100",
+            "low": "1.09700",
+            "close": "1.09720",
+        }]
+        after = backtest_breakout(extended, pair="EURUSD", lookback=5)
+        self.assertEqual(after["trades"][0], result["trades"][0])
+
     def test_confirmed_breakout_enters_on_next_bar_and_reports_assumptions(self):
         result = backtest_breakout(
             sample_candles(), pair="EURUSD", lookback=5)

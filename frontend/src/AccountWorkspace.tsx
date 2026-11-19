@@ -27,13 +27,10 @@ export default function AccountWorkspace() {
   const [oauthBusy, setOauthBusy] = useState(false);
   const [selectedId, setSelectedId] = useState('');
   const [token, setToken] = useState(() => sessionStorage.getItem(SESSION_KEY) || '');
-  const [username, setUsername] = useState('playgo_admin');
-  const [password, setPassword] = useState('');
   const [dashboardPage, setDashboardPage] = useState<DashboardPage>(() => getPageFromPath());
   const [data, setData] = useState<Snapshot | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [signingIn, setSigningIn] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [botState, setBotState] = useState<DemoBotState | null>(null);
   const [botBusy, setBotBusy] = useState(false);
@@ -337,7 +334,11 @@ export default function AccountWorkspace() {
       }
       throw Error('Sign-in timed out. Please try again.');
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        e instanceof TypeError
+          ? `Cannot reach the Deriv sign-in API at ${API}. Start the backend with app.index:app and try again.`
+          : (e as Error).message
+      );
     } finally {
       sessionStorage.removeItem(HANDOFF_KEY);
       if (!popup.closed) popup.close();
@@ -366,7 +367,7 @@ export default function AccountWorkspace() {
           sessionStorage.removeItem(SESSION_KEY);
           setToken('');
           setData(null);
-          setError('Your PlayGo session expired. Please sign in again.');
+          setError('Your Deriv session expired. Please sign in again.');
           return;
         }
         if (!response.ok) {
@@ -549,35 +550,12 @@ export default function AccountWorkspace() {
     };
   }, [token, derivSession, selected?.account_id, selected?.account_type, botState?.running, botState?.account_id]);
 
-  async function login(e: React.FormEvent) {
-    e.preventDefault();
-    setSigningIn(true);
-    setError('');
-    try {
-      const r = await fetch(API + '/api/identity/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-      const body = await r.json();
-      if (!r.ok) throw Error(typeof body.detail === 'string' ? body.detail : 'Sign-in failed.');
-      if (typeof body.access_token !== 'string') throw Error('Invalid sign-in response.');
-      sessionStorage.setItem(SESSION_KEY, body.access_token);
-      setToken(body.access_token);
-      setPassword('');
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSigningIn(false);
-    }
-  }
-
   async function logout() {
     setOauthBusy(false);
     setBusy(true);
     setError('');
     try {
-      const r = await fetch(API + (derivSession ? '/api/deriv/session/logout' : '/api/identity/logout'), {
+      const r = await fetch(API + '/api/deriv/session/logout', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token },
       });
@@ -585,8 +563,7 @@ export default function AccountWorkspace() {
       sessionStorage.removeItem(SESSION_KEY);
       setToken('');
       setData(null);
-      setPassword('');
-      pushNotification('bot', 'Signed Out', 'Your PlayGo session ended safely.');
+      pushNotification('bot', 'Signed Out', 'Your Deriv session ended safely.');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -666,19 +643,13 @@ export default function AccountWorkspace() {
           token={token}
           oauthBusy={oauthBusy}
           busy={busy}
-          signingIn={signingIn}
           data={data}
           selected={selected}
           selectedId={selectedId}
           error={error}
-          username={username}
-          password={password}
           onSelectId={setSelectedId}
           onRefresh={() => setRefresh((v) => v + 1)}
           onSignInDeriv={() => void signInWithDeriv()}
-          onOwnerLogin={login}
-          onUsernameChange={setUsername}
-          onPasswordChange={setPassword}
         />
       )}
 

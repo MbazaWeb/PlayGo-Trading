@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PlayGo Paper Trading PostgreSQL API", lifespan=lifespan)
-origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if x.strip()]
+origins = [x.strip() for x in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if x.strip()]
 if "*" in origins:
     raise RuntimeError("Wildcard CORS_ORIGINS is forbidden")
 app.add_middleware(CORSMiddleware, allow_origins=origins,

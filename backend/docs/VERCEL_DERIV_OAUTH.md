@@ -6,7 +6,7 @@ Production uses two Git-connected Vercel projects. The frontend project builds `
 
 | Scope | Setting | Purpose |
 | --- | --- | --- |
-| Frontend | `VITE_API_URL` | `https://playgo-ai-trading-api.vercel.app` |
+| Frontend | `NEXT_PUBLIC_API_URL` | `https://playgo-ai-trading-api.vercel.app` |
 | API | `DATABASE_URL` | Server-only PostgreSQL connection string |
 | API | `PLAYGO_ENV` | `production` |
 | API | `CORS_ORIGINS` | `https://playgo-ai-trading.vercel.app` |
@@ -15,6 +15,8 @@ Production uses two Git-connected Vercel projects. The frontend project builds `
 | API | `DERIV_OAUTH_ENCRYPTION_KEY` | Persistent server-only Fernet key |
 
 Register the exact callback URI with Deriv. Configure the OAuth application for the Options account and demo execution flow. Keep API secrets in the server environment, and restrict logs that may retain callback query strings.
+
+Dashboard sign-in is per-user Deriv OAuth. `DERIV_API_TOKEN` is not a user login credential; do not expose it in the browser or use it as a shared sign-in token.
 
 ## Sign-in and account scope
 

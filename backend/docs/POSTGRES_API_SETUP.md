@@ -9,7 +9,7 @@ Create a repository-root `.env`:
 ```dotenv
 PLAYGO_ENV=local
 DATABASE_URL=postgresql://DB_USER:URL_ENCODED_PASSWORD@DB_HOST:5432/DB_NAME?sslmode=require
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 ```
 
 Use the connection details for your development database. If direct access is unavailable, use the Supabase Session pooler details. Keep the connection string on the server.
@@ -20,7 +20,7 @@ Apply the SQL files in this order, matching the PostgreSQL CI job:
 2. [Owner identity](../sql/supabase_owner_identity.sql)
 3. [Accounting integrity](../sql/supabase_accounting_integrity.sql)
 
-From `backend/`, start `python -m uvicorn app.index:app --port 8001` in the project virtual environment. The frontend defaults to `http://127.0.0.1:8001` in local development. Check `GET /api/health` for liveness and `GET /api/ready` for database readiness.
+From `backend/`, start `python -m uvicorn app.index:app --host 127.0.0.1 --port 8001` in the project virtual environment. The frontend defaults to `http://127.0.0.1:8001` in local development. Check `GET /api/health` for liveness and `GET /api/ready` for database readiness.
 
 ## Identity and account data
 

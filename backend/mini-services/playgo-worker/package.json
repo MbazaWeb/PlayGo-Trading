@@ -1,0 +1,9 @@
+{
+  "name": "playgo-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "bun --hot run index.ts"
+  },
+  "dependencies": {}
+}

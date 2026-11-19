@@ -18,10 +18,14 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from app.agents import signal as ema_signal
 from app.deriv_accounts import parse_accounts
 from app.deriv_market_data import DerivMarketDataError, parse_candles
 from app.postgres_api import connect
+from app.strategy_engine import (
+    DEFAULT_STRATEGY_ID,
+    SUPPORTED_STRATEGY_IDS,
+    evaluate_strategy,
+)
 
 router = APIRouter()
 COLLECTION = "deriv_demo_bots"
@@ -55,6 +59,7 @@ class DemoBotRequest(BaseModel):
 class DemoBotStartRequest(DemoBotRequest):
     symbol: Optional[str] = None
     contract_type: Optional[Literal["CALL_PUT", "CALL", "PUT"]] = None
+    strategy_id: Optional[str] = None
     duration_minutes: Optional[int] = Field(default=None, ge=1, le=60)
     stake: Optional[Decimal] = Field(default=None, ge=Decimal("0.35"), le=Decimal("100"))
     daily_stake_limit: Optional[Decimal] = Field(default=None, ge=Decimal("1"), le=Decimal("500"))
@@ -66,6 +71,13 @@ class DemoBotStartRequest(DemoBotRequest):
             return None
         if value not in ALLOWED_SYMBOLS:
             raise ValueError(f"Unsupported symbol: {value}")
+        return value
+
+    @field_validator("strategy_id")
+    @classmethod
+    def validate_strategy(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in SUPPORTED_STRATEGY_IDS:
+            raise ValueError("Strategy is unavailable for demo execution.")
         return value
 
 
@@ -112,6 +124,11 @@ def _state_daily_limit(state) -> Decimal:
     return DAILY_STAKE_LIMIT
 
 
+def _state_strategy_id(state):
+    value = state.get("strategy_id", DEFAULT_STRATEGY_ID)
+    return value if isinstance(value, str) and value in SUPPORTED_STRATEGY_IDS else None
+
+
 def _account_document_id(account_id):
     return hashlib.sha256(account_id.encode()).hexdigest()
 
@@ -124,6 +141,7 @@ def _empty_state(account_id):
     return {
         "account_id": account_id,
         "symbol": SYMBOL,
+        "strategy_id": DEFAULT_STRATEGY_ID,
         "contract_type": "CALL_PUT",
         "duration_minutes": DURATION_MINUTES,
         "stake": str(STAKE),
@@ -133,6 +151,9 @@ def _empty_state(account_id):
         "day": _utc_day(),
         "daily_stake": "0",
         "last_processed_epoch": 0,
+        "last_signal": "HOLD",
+        "last_signal_reason": "Waiting for a completed candle.",
+        "last_signal_at": None,
         "active_contract_id": None,
         "active_until": 0,
         "pending_trade": None,
@@ -171,8 +192,12 @@ def _sync_run_record(cursor, account_id, state, *, session_id=None):
     if session_id is not None:
         if not isinstance(session_id, str) or not re.fullmatch(r"[0-9a-f]{64}", session_id):
             raise RuntimeError("Invalid Deriv session identifier")
+        strategy_id = _state_strategy_id(state)
+        if strategy_id is None:
+            raise RuntimeError("Invalid demo bot strategy")
         config = {
-            "strategy": "EMA_9_21_CROSS",
+            "strategy": "EMA_9_21_CROSS" if strategy_id == DEFAULT_STRATEGY_ID else strategy_id.upper().replace("-", "_"),
+            "strategy_id": strategy_id,
             "execution": "DEMO_ONLY",
             "symbol": _state_symbol(state),
             "contract_type": _state_contract_type(state),
@@ -256,10 +281,16 @@ def _load_state(account_id):
 
 
 def _public_state(state):
+    strategy_id = _state_strategy_id(state)
     return {
         "execution": "DEMO_ONLY",
-        "strategy": "EMA_9_21_CROSS",
         **state,
+        "strategy": (
+            "EMA_9_21_CROSS"
+            if strategy_id == DEFAULT_STRATEGY_ID
+            else strategy_id.upper().replace("-", "_") if strategy_id else "INVALID"
+        ),
+        "strategy_id": strategy_id,
         "trade_activity": state.get("trade_activity", []),
         "symbol": _state_symbol(state),
         "contract_type": _state_contract_type(state),
@@ -360,7 +391,7 @@ def _record_trade_activity(state, status, contract_id=None):
     })
 
 
-def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL, balance=None):
+def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL, balance=None, decision=None):
     with _locked_state(account_id) as state:
         if not state["running"] or _state_symbol(state) != symbol:
             return state, False
@@ -369,6 +400,10 @@ def _reserve_signal(account_id, *, side, candle_epoch, now, symbol=SYMBOL, balan
             state["day"] = day
             state["daily_stake"] = "0"
         state["last_cycle_at"] = datetime.fromtimestamp(now, timezone.utc).isoformat()
+        if isinstance(decision, dict):
+            state["last_signal"] = decision.get("signal", "HOLD")
+            state["last_signal_reason"] = decision.get("reason", "No strategy decision.")
+            state["last_signal_at"] = decision.get("bar_time")
         if state["pending_trade"]:
             pending_at = state["pending_trade"].get("created_at", 0)
             if now - pending_at > 120:
@@ -573,6 +608,12 @@ async def start_demo_bot(payload: DemoBotStartRequest, authorization: str = Head
             next_contract_type = (
                 payload.contract_type if payload.contract_type is not None else _state_contract_type(state)
             )
+            current_strategy_id = _state_strategy_id(state)
+            if current_strategy_id is None:
+                raise HTTPException(503, "Saved demo bot strategy is invalid.")
+            next_strategy_id = (
+                payload.strategy_id if payload.strategy_id is not None else current_strategy_id
+            )
             next_duration = (
                 payload.duration_minutes if payload.duration_minutes is not None else _state_duration(state)
             )
@@ -594,6 +635,11 @@ async def start_demo_bot(payload: DemoBotStartRequest, authorization: str = Head
                 state["last_processed_epoch"] = 0
 
             state["symbol"] = next_symbol
+            if next_strategy_id != current_strategy_id:
+                state["last_signal"] = "HOLD"
+                state["last_signal_reason"] = "Strategy selected; waiting for the next completed candle."
+                state["last_signal_at"] = None
+            state["strategy_id"] = next_strategy_id
             state["contract_type"] = next_contract_type
             state["duration_minutes"] = next_duration
             state["stake"] = format(next_stake, "f")
@@ -728,15 +774,28 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
             )["candles"]
             now = int(time.time())
             completed = [item for item in candles if item["epoch"] + GRANULARITY <= now]
-            if len(completed) < 23:
-                raise DemoBotProviderError("Deriv has not returned enough completed candles.")
+            if not completed:
+                with _locked_state(payload.account_id) as state:
+                    state["last_cycle_at"] = datetime.now(timezone.utc).isoformat()
+                    state["status"] = "waiting_for_market"
+                    state["last_signal"] = "HOLD"
+                    state["last_signal_reason"] = "Waiting for a completed candle."
+                return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
             latest = completed[-1]
             if now - (latest["epoch"] + GRANULARITY) > MAX_CANDLE_AGE:
                 with _locked_state(payload.account_id) as state:
                     state["last_cycle_at"] = datetime.now(timezone.utc).isoformat()
                     state["status"] = "waiting_for_market"
                 return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
-            side = ema_signal([float(item["close"]) for item in completed[-23:]])
+            strategy_id = _state_strategy_id(initial)
+            if strategy_id is None:
+                with _locked_state(payload.account_id) as state:
+                    state["running"] = False
+                    state["status"] = "feed_error"
+                    state["last_error"] = "The saved strategy is unsupported. Select a supported strategy before restarting."
+                return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})
+            decision = evaluate_strategy(strategy_id, completed)
+            side = decision["signal"] if decision["signal"] in {"BUY", "SELL"} else None
             state, reserved = _reserve_signal(
                 payload.account_id,
                 side=side,
@@ -744,6 +803,7 @@ async def cycle_demo_bot(payload: DemoBotRequest, authorization: str = Header(de
                 now=now,
                 symbol=symbol,
                 balance=account.get("balance"),
+                decision=decision,
             )
             if not reserved:
                 return JSONResponse(_public_state(state), headers={"Cache-Control": "no-store"})

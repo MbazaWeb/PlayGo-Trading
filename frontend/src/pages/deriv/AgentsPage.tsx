@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import '../../styles/agents.css';
 import { AGENT_PROMPT } from '../../data/agentPrompt';
 import { Account, DemoBotState, Snapshot } from '../../types/trading';
+import { DEFAULT_STRATEGY_ID, isSupportedStrategy, strategies, SUPPORTED_STRATEGY_IDS } from '../../../strategy';
 
 type Props = {
   load: (path: string) => Promise<unknown>;
   data: Snapshot | null;
   selected: Account | undefined;
   botState: DemoBotState | null;
+  selectedStrategyId: string;
+  onStrategyChange: (id: string) => void;
 };
 
 type Performance = {
@@ -40,11 +43,23 @@ function wilsonLower(wins: number, n: number): number {
 const pct = (v: number) => (v * 100).toFixed(1) + '%';
 const num = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
 
-export default function AgentsPage({ load, data, selected, botState }: Props) {
+export default function AgentsPage({
+  load,
+  data,
+  selected,
+  botState,
+  selectedStrategyId,
+  onStrategyChange,
+}: Props) {
   const [perf, setPerf] = useState<Performance | null>(null);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const accountId = data?.connected ? selected?.account_id : undefined;
+  const supportedIds = new Set<string>(SUPPORTED_STRATEGY_IDS);
+  const selectedStrategy = strategies.find((strategy) => strategy.id === selectedStrategyId)
+    ?? strategies.find((strategy) => strategy.id === DEFAULT_STRATEGY_ID)!;
+  const activeStrategy = strategies.find((strategy) => strategy.id === botState?.strategy_id)
+    ?? selectedStrategy;
 
   useEffect(() => {
     if (!accountId) { setPerf(null); return; }
@@ -102,8 +117,11 @@ export default function AgentsPage({ load, data, selected, botState }: Props) {
   const agents = [
     { name: 'Research', badge: 'Partial', tone: 'partial', note: 'Offline breakout backtest only. No live research feed or news.',
       metric: 'Mode: offline' },
-    { name: 'Strategy & Trade', badge: 'Live (demo)', tone: 'live', note: 'EMA crossover signal. Not validated as profitable.',
-      metric: botState ? `${botState.symbol} · ${botState.contract_type} · ${botState.duration_minutes}m` : 'Bot not loaded' },
+    { name: 'Strategy & Trade', badge: botState?.running ? 'Live (demo)' : 'Demo only', tone: 'live',
+      note: `${botState?.running ? activeStrategy.name : selectedStrategy.name} uses closed 5-minute candles. Not validated as profitable.`,
+      metric: botState
+        ? `${botState.last_signal ?? 'HOLD'} · ${botState.symbol} · ${botState.contract_type} · ${botState.duration_minutes}m`
+        : `${selectedStrategy.name} · waiting for demo bot` },
     { name: 'Risk', badge: 'Partial', tone: 'partial', note: 'Stake cap and daily stake limit. Loss-based auto-stop not built yet.',
       metric: botState ? `Budget ${used.toFixed(2)} / ${limit.toFixed(2)}` : 'n/a' },
     { name: 'Investments', badge: 'Partial', tone: 'partial', note: 'Demo balance and stake sizing only. No portfolio allocation logic.',
@@ -137,6 +155,68 @@ export default function AgentsPage({ load, data, selected, botState }: Props) {
             )}
           </article>
         ))}
+      </section>
+
+      <section className="agentsPanel agentStrategyPanel">
+        <h2>Decision strategy <small>Demo bot only</small></h2>
+        <p>
+          Choose which supported strategy the agent evaluates on each new, closed Deriv 5-minute candle.
+          Changing this selection does not place a trade; starting the demo bot is still an explicit action.
+        </p>
+        <label className="agentStrategyLabel" htmlFor="agent-strategy">
+          Strategy
+          <select
+            id="agent-strategy"
+            value={selectedStrategy.id}
+            disabled={Boolean(botState?.running)}
+            onChange={(event) => {
+              const nextId = event.currentTarget.value;
+              if (isSupportedStrategy(nextId)) onStrategyChange(nextId);
+            }}
+          >
+            <optgroup label={`Available rule-based strategies (${SUPPORTED_STRATEGY_IDS.length})`}>
+              {strategies.filter((strategy) => supportedIds.has(strategy.id)).map((strategy) => (
+                <option key={strategy.id} value={strategy.id}>
+                  {strategy.category} — {strategy.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label={`Research only — not implemented (${strategies.length - supportedIds.size})`}>
+              {strategies.filter((strategy) => !supportedIds.has(strategy.id)).map((strategy) => (
+                <option key={strategy.id} value={strategy.id} disabled>
+                  {strategy.category} — {strategy.name}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        </label>
+
+        <div className="agentStrategyDetails">
+          <div>
+            <strong>{botState?.running ? activeStrategy.name : selectedStrategy.name}</strong>
+            <small>
+              {botState?.running
+                ? 'Running strategy. Stop the bot before changing it.'
+                : 'The next explicit demo-bot start will use this strategy.'}
+            </small>
+          </div>
+          {botState ? (
+            <div className="agentDecision">
+              <span>{botState.running ? 'Latest agent decision' : 'Last agent decision'}</span>
+              <strong className={'agentSignal agentSignal-' + (botState.last_signal ?? 'HOLD').toLowerCase()}>
+                {botState.last_signal ?? 'HOLD'}
+              </strong>
+              <small>{botState.last_signal_reason ?? 'No strategy decision is recorded yet.'}</small>
+              {botState.last_signal_at && <time>{new Date(botState.last_signal_at).toLocaleString()}</time>}
+            </div>
+          ) : (
+            <p className="agentsHint">Start the demo bot to see its strategy decisions here.</p>
+          )}
+        </div>
+        <p className="agentsHint">
+          The supplied catalog has 50 entries; only 24 currently have rule-based evaluators. The remaining 26 stay
+          disabled until implemented. Signals are research rules, not profit guarantees; real-money routing remains locked.
+        </p>
       </section>
 
       <section className="agentsPanel">

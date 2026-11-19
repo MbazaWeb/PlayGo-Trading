@@ -12,6 +12,7 @@ import {
   Snapshot,
 } from './types/trading';
 import { API, HANDOFF_KEY, SESSION_KEY, getPageFromPath, randomSecret } from './services/api';
+import { DEFAULT_STRATEGY_ID, getStrategy, isSupportedStrategy } from '../strategy';
 import Navbar from './components/Navbar';
 import NotificationPanel from './components/NotificationPanel';
 import AccountPage from './pages/deriv/AccountPage';
@@ -35,6 +36,7 @@ export default function AccountWorkspace() {
   const [botState, setBotState] = useState<DemoBotState | null>(null);
   const [botBusy, setBotBusy] = useState(false);
   const [botError, setBotError] = useState('');
+  const [strategyId, setStrategyId] = useState(DEFAULT_STRATEGY_ID);
 
   // Notification Logs State
   const [notifications, setNotifications] = useState<NotificationLog[]>(() => {
@@ -98,6 +100,14 @@ export default function AccountWorkspace() {
     data?.accounts.find((account) => account.account_id === selectedId) ??
     data?.accounts.find((account) => account.account_type === (derivSession ? 'demo' : 'real')) ??
     data?.accounts[0];
+  const selectedStrategyName = getStrategy(strategyId)?.name ?? 'EMA Crossover';
+
+  const acceptBotState = useCallback((state: DemoBotState) => {
+    setBotState(state);
+    if (state.account_id === selected?.account_id && state.strategy_id && isSupportedStrategy(state.strategy_id)) {
+      setStrategyId(state.strategy_id);
+    }
+  }, [selected?.account_id]);
 
   // Track Market Open / Closed Status Changes
   const marketStatusRef = useRef<Record<string, boolean>>({});
@@ -421,7 +431,7 @@ export default function AccountWorkspace() {
         return body as DemoBotState;
       })
       .then((state) => {
-        if (active) setBotState(state);
+        if (active) acceptBotState(state);
       })
       .catch((e) => {
         if (active) {
@@ -432,7 +442,7 @@ export default function AccountWorkspace() {
     return () => {
       active = false;
     };
-  }, [token, derivSession, selected?.account_id, selected?.account_type, refresh]);
+  }, [acceptBotState, token, derivSession, selected?.account_id, selected?.account_type, refresh]);
 
   async function botAction(action: 'start' | 'stop', config?: BotConfig) {
     if (!selected || selected.account_type !== 'demo') return;
@@ -442,10 +452,14 @@ export default function AccountWorkspace() {
       const response = await fetch(API + '/api/deriv/demo-bot/' + action, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: selected.account_id, ...(config || {}) }),
+        body: JSON.stringify({
+          account_id: selected.account_id,
+          ...(config || {}),
+          ...(action === 'start' ? { strategy_id: strategyId } : {}),
+        }),
       });
       const body = await response.json();
-      if (typeof body.execution === 'string') setBotState(body as DemoBotState);
+      if (typeof body.execution === 'string') acceptBotState(body as DemoBotState);
       if (!response.ok) {
         throw Error(
           typeof body.detail === 'string'
@@ -491,7 +505,7 @@ export default function AccountWorkspace() {
         body: JSON.stringify({ account_id: selected.account_id, confirmed_account_review: true }),
       });
       const body = await response.json();
-      if (typeof body.execution === 'string') setBotState(body as DemoBotState);
+      if (typeof body.execution === 'string') acceptBotState(body as DemoBotState);
       if (!response.ok) {
         throw Error(typeof body.detail === 'string' ? body.detail : 'Unable to resolve demo bot status.');
       }
@@ -519,7 +533,7 @@ export default function AccountWorkspace() {
           body: JSON.stringify({ account_id: accountId }),
         });
         const body = await response.json();
-        if (active && typeof body.execution === 'string') setBotState(body as DemoBotState);
+        if (active && typeof body.execution === 'string') acceptBotState(body as DemoBotState);
         if (response.status === 401) {
           sessionStorage.removeItem(SESSION_KEY);
           setToken('');
@@ -548,7 +562,7 @@ export default function AccountWorkspace() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [token, derivSession, selected?.account_id, selected?.account_type, botState?.running, botState?.account_id]);
+  }, [acceptBotState, token, derivSession, selected?.account_id, selected?.account_type, botState?.running, botState?.account_id]);
 
   async function logout() {
     setOauthBusy(false);
@@ -660,6 +674,7 @@ export default function AccountWorkspace() {
           derivSession={derivSession}
           selected={selected}
           botState={botState?.account_id === selected?.account_id ? botState : null}
+          selectedStrategyName={selectedStrategyName}
           botBusy={botBusy}
           botError={botError}
           oauthBusy={oauthBusy}
@@ -690,6 +705,10 @@ export default function AccountWorkspace() {
           data={data}
           selected={selected}
           botState={botState?.account_id === selected?.account_id ? botState : null}
+          selectedStrategyId={strategyId}
+          onStrategyChange={(id) => {
+            if (isSupportedStrategy(id)) setStrategyId(id);
+          }}
         />
       )}
 

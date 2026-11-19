@@ -127,6 +127,24 @@ class DemoBotStateTests(unittest.TestCase):
         self.assertFalse(capped["running"])
         self.assertEqual(capped["status"], "daily_budget_reached")
 
+    def test_hold_signal_is_saved_without_reserving_stake(self):
+        now = int(time.time())
+        state, reserved = bot._reserve_signal(
+            "DOT123",
+            side=None,
+            candle_epoch=300,
+            now=now,
+            decision={
+                "signal": "HOLD",
+                "reason": "Conditions not met",
+                "bar_time": "2026-01-01T00:00:00+00:00",
+            },
+        )
+        self.assertFalse(reserved)
+        self.assertEqual(state["last_signal"], "HOLD")
+        self.assertEqual(state["last_signal_reason"], "Conditions not met")
+        self.assertEqual(state["daily_stake"], "0")
+
     def test_trade_activity_records_initiation_submission_and_confirmed_contract(self):
         now = int(time.time())
         _, reserved = bot._reserve_signal(
@@ -198,6 +216,37 @@ class DemoBotStateTests(unittest.TestCase):
         self.assertEqual(response.json()["execution"], "DEMO_ONLY")
         self.assertEqual(response.json()["stake"], "2")
         self.assertEqual(response.json()["daily_stake_limit"], "5")
+        self.assertEqual(response.json()["strategy_id"], "ema-crossover")
+
+    def test_start_uses_a_selected_supported_strategy(self):
+        app = FastAPI()
+        app.include_router(bot.router)
+        client = TestClient(app)
+        self.state["running"] = False
+        with patch.object(bot, "_deriv_connection", return_value={"access_token": "private-token", "session_digest": "a" * 64}), \
+             patch.object(bot, "_demo_account", new=AsyncMock(return_value={"currency": "USD"})), \
+             patch.object(bot, "_locked_state", side_effect=self.lock_context):
+            response = client.post(
+                "/api/deriv/demo-bot/start",
+                json={"account_id": "DOT123", "strategy_id": "rsi-momentum"},
+                headers={"Authorization": "Bearer deriv_" + "a" * 64},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["strategy_id"], "rsi-momentum")
+        self.assertEqual(self.state["strategy_id"], "rsi-momentum")
+
+    def test_start_rejects_research_only_strategies(self):
+        app = FastAPI()
+        app.include_router(bot.router)
+        client = TestClient(app)
+        with patch.object(bot, "_deriv_connection") as get_connection:
+            response = client.post(
+                "/api/deriv/demo-bot/start",
+                json={"account_id": "DOT123", "strategy_id": "supertrend"},
+            )
+        self.assertEqual(response.status_code, 422)
+        get_connection.assert_not_called()
+
 
     def test_start_reports_missing_run_ledger_schema(self):
         app = FastAPI()
@@ -317,6 +366,7 @@ class DemoBotLedgerTests(unittest.TestCase):
         self.assertIn("insert into playgo_private.bot_runs", cursor.query)
         self.assertEqual(cursor.params[:2], (session_id, "DOT123"))
         self.assertEqual(config["strategy"], "EMA_9_21_CROSS")
+        self.assertEqual(config["strategy_id"], "ema-crossover")
         self.assertEqual(config["execution"], "DEMO_ONLY")
         self.assertEqual(config["stake"], "2")
         self.assertEqual(state["run_id"], "a3d8e602-621c-4bd0-8ff1-543d9f9e139f")

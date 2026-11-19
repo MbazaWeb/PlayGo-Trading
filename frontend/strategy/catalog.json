@@ -1,0 +1,302 @@
+[
+  {
+    "id": "moving-average-crossover",
+    "name": "Moving Average Crossover",
+    "category": "Trend",
+    "module": "./strategies/moving-average-crossover.ts"
+  },
+  {
+    "id": "ema-crossover",
+    "name": "EMA Crossover",
+    "category": "Trend",
+    "module": "./strategies/ema-crossover.ts"
+  },
+  {
+    "id": "triple-moving-average",
+    "name": "Triple Moving Average",
+    "category": "Trend",
+    "module": "./strategies/triple-moving-average.ts"
+  },
+  {
+    "id": "macd-crossover",
+    "name": "MACD Crossover",
+    "category": "Trend",
+    "module": "./strategies/macd-crossover.ts"
+  },
+  {
+    "id": "supertrend",
+    "name": "Supertrend",
+    "category": "Trend",
+    "module": "./strategies/supertrend.ts"
+  },
+  {
+    "id": "adx-trend-following",
+    "name": "ADX Trend Following",
+    "category": "Trend",
+    "module": "./strategies/adx-trend-following.ts"
+  },
+  {
+    "id": "ichimoku-cloud",
+    "name": "Ichimoku Cloud",
+    "category": "Trend",
+    "module": "./strategies/ichimoku-cloud.ts"
+  },
+  {
+    "id": "parabolic-sar",
+    "name": "Parabolic SAR",
+    "category": "Trend",
+    "module": "./strategies/parabolic-sar.ts"
+  },
+  {
+    "id": "donchian-channel-breakout",
+    "name": "Donchian Channel Breakout",
+    "category": "Trend",
+    "module": "./strategies/donchian-channel-breakout.ts"
+  },
+  {
+    "id": "moving-average-pullback",
+    "name": "Moving Average Pullback",
+    "category": "Trend",
+    "module": "./strategies/moving-average-pullback.ts"
+  },
+  {
+    "id": "rsi-momentum",
+    "name": "RSI Momentum",
+    "category": "Momentum",
+    "module": "./strategies/rsi-momentum.ts"
+  },
+  {
+    "id": "stochastic-crossover",
+    "name": "Stochastic Crossover",
+    "category": "Momentum",
+    "module": "./strategies/stochastic-crossover.ts"
+  },
+  {
+    "id": "rate-of-change",
+    "name": "Rate of Change",
+    "category": "Momentum",
+    "module": "./strategies/rate-of-change.ts"
+  },
+  {
+    "id": "cci-momentum",
+    "name": "CCI Momentum",
+    "category": "Momentum",
+    "module": "./strategies/cci-momentum.ts"
+  },
+  {
+    "id": "momentum-breakout",
+    "name": "Momentum Breakout",
+    "category": "Momentum",
+    "module": "./strategies/momentum-breakout.ts"
+  },
+  {
+    "id": "williams-r",
+    "name": "Williams %R",
+    "category": "Momentum",
+    "module": "./strategies/williams-r.ts"
+  },
+  {
+    "id": "awesome-oscillator",
+    "name": "Awesome Oscillator",
+    "category": "Momentum",
+    "module": "./strategies/awesome-oscillator.ts"
+  },
+  {
+    "id": "rsi-divergence",
+    "name": "RSI Divergence",
+    "category": "Momentum",
+    "module": "./strategies/rsi-divergence.ts"
+  },
+  {
+    "id": "bollinger-bands-reversion",
+    "name": "Bollinger Bands Reversion",
+    "category": "Mean Reversion",
+    "module": "./strategies/bollinger-bands-reversion.ts"
+  },
+  {
+    "id": "rsi-oversold-overbought",
+    "name": "RSI Oversold Overbought",
+    "category": "Mean Reversion",
+    "module": "./strategies/rsi-oversold-overbought.ts"
+  },
+  {
+    "id": "z-score-reversion",
+    "name": "Z-Score Reversion",
+    "category": "Mean Reversion",
+    "module": "./strategies/z-score-reversion.ts"
+  },
+  {
+    "id": "keltner-channel-reversion",
+    "name": "Keltner Channel Reversion",
+    "category": "Mean Reversion",
+    "module": "./strategies/keltner-channel-reversion.ts"
+  },
+  {
+    "id": "vwap-reversion",
+    "name": "VWAP Reversion",
+    "category": "Mean Reversion",
+    "module": "./strategies/vwap-reversion.ts"
+  },
+  {
+    "id": "stochastic-reversal",
+    "name": "Stochastic Reversal",
+    "category": "Mean Reversion",
+    "module": "./strategies/stochastic-reversal.ts"
+  },
+  {
+    "id": "moving-average-reversion",
+    "name": "Moving Average Reversion",
+    "category": "Mean Reversion",
+    "module": "./strategies/moving-average-reversion.ts"
+  },
+  {
+    "id": "support-resistance-breakout",
+    "name": "Support Resistance Breakout",
+    "category": "Breakout",
+    "module": "./strategies/support-resistance-breakout.ts"
+  },
+  {
+    "id": "bollinger-band-squeeze",
+    "name": "Bollinger Band Squeeze",
+    "category": "Breakout",
+    "module": "./strategies/bollinger-band-squeeze.ts"
+  },
+  {
+    "id": "opening-range-breakout",
+    "name": "Opening Range Breakout",
+    "category": "Breakout",
+    "module": "./strategies/opening-range-breakout.ts"
+  },
+  {
+    "id": "atr-breakout",
+    "name": "ATR Breakout",
+    "category": "Breakout",
+    "module": "./strategies/atr-breakout.ts"
+  },
+  {
+    "id": "price-channel-breakout",
+    "name": "Price Channel Breakout",
+    "category": "Breakout",
+    "module": "./strategies/price-channel-breakout.ts"
+  },
+  {
+    "id": "previous-high-low-breakout",
+    "name": "Previous High Low Breakout",
+    "category": "Breakout",
+    "module": "./strategies/previous-high-low-breakout.ts"
+  },
+  {
+    "id": "consolidation-breakout",
+    "name": "Consolidation Breakout",
+    "category": "Breakout",
+    "module": "./strategies/consolidation-breakout.ts"
+  },
+  {
+    "id": "engulfing-candlestick",
+    "name": "Engulfing Candlestick",
+    "category": "Price Action",
+    "module": "./strategies/engulfing-candlestick.ts"
+  },
+  {
+    "id": "pin-bar-reversal",
+    "name": "Pin Bar Reversal",
+    "category": "Price Action",
+    "module": "./strategies/pin-bar-reversal.ts"
+  },
+  {
+    "id": "inside-bar-breakout",
+    "name": "Inside Bar Breakout",
+    "category": "Price Action",
+    "module": "./strategies/inside-bar-breakout.ts"
+  },
+  {
+    "id": "double-top-bottom",
+    "name": "Double Top Bottom",
+    "category": "Price Action",
+    "module": "./strategies/double-top-bottom.ts"
+  },
+  {
+    "id": "head-and-shoulders",
+    "name": "Head and Shoulders",
+    "category": "Price Action",
+    "module": "./strategies/head-and-shoulders.ts"
+  },
+  {
+    "id": "trendline-breakout",
+    "name": "Trendline Breakout",
+    "category": "Price Action",
+    "module": "./strategies/trendline-breakout.ts"
+  },
+  {
+    "id": "higher-high-higher-low",
+    "name": "Higher High Higher Low",
+    "category": "Price Action",
+    "module": "./strategies/higher-high-higher-low.ts"
+  },
+  {
+    "id": "supply-and-demand-zones",
+    "name": "Supply and Demand Zones",
+    "category": "Price Action",
+    "module": "./strategies/supply-and-demand-zones.ts"
+  },
+  {
+    "id": "pairs-trading",
+    "name": "Pairs Trading",
+    "category": "Quantitative",
+    "module": "./strategies/pairs-trading.ts"
+  },
+  {
+    "id": "cointegration-mean-reversion",
+    "name": "Cointegration Mean Reversion",
+    "category": "Quantitative",
+    "module": "./strategies/cointegration-mean-reversion.ts"
+  },
+  {
+    "id": "statistical-arbitrage",
+    "name": "Statistical Arbitrage",
+    "category": "Quantitative",
+    "module": "./strategies/statistical-arbitrage.ts"
+  },
+  {
+    "id": "market-regime-switching",
+    "name": "Market Regime Switching",
+    "category": "Quantitative",
+    "module": "./strategies/market-regime-switching.ts"
+  },
+  {
+    "id": "multi-timeframe-confirmation",
+    "name": "Multi Timeframe Confirmation",
+    "category": "Quantitative",
+    "module": "./strategies/multi-timeframe-confirmation.ts"
+  },
+  {
+    "id": "volatility-targeting",
+    "name": "Volatility Targeting",
+    "category": "Quantitative",
+    "module": "./strategies/volatility-targeting.ts"
+  },
+  {
+    "id": "trend-momentum-hybrid",
+    "name": "Trend Momentum Hybrid",
+    "category": "Quantitative",
+    "module": "./strategies/trend-momentum-hybrid.ts"
+  },
+  {
+    "id": "ensemble-voting",
+    "name": "Ensemble Voting",
+    "category": "Quantitative",
+    "module": "./strategies/ensemble-voting.ts"
+  },
+  {
+    "id": "machine-learning-classification",
+    "name": "Machine Learning Classification",
+    "category": "Quantitative",
+    "module": "./strategies/machine-learning-classification.ts"
+  },
+  {
+    "id": "walk-forward-adaptive-strategy",
+    "name": "Walk Forward Adaptive Strategy",
+    "category": "Quantitative",
+    "module": "./strategies/walk-forward-adaptive-strategy.ts"
+  }
+]

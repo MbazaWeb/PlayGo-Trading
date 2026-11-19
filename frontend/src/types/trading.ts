@@ -41,6 +41,7 @@ export type BotConfig = {
 export type DemoBotState = {
   execution: 'DEMO_ONLY';
   strategy: string;
+  strategy_id?: string | null;
   symbol: string;
   contract_type: string;
   duration_minutes: number;
@@ -49,6 +50,9 @@ export type DemoBotState = {
   account_id: string;
   running: boolean;
   status: string;
+  last_signal?: 'BUY' | 'SELL' | 'HOLD';
+  last_signal_reason?: string;
+  last_signal_at?: string | null;
   daily_stake: string;
   active_contract_id: string | null;
   trade_activity?: {

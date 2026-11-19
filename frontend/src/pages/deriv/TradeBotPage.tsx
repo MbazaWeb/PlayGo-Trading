@@ -6,6 +6,7 @@ type Props = {
   derivSession: boolean;
   selected: Account | undefined;
   botState: DemoBotState | null;
+  selectedStrategyName: string;
   botBusy: boolean;
   botError: string;
   oauthBusy: boolean;
@@ -33,6 +34,7 @@ export default function TradeBotPage({
   derivSession,
   selected,
   botState,
+  selectedStrategyName,
   botBusy,
   botError,
   oauthBusy,
@@ -112,7 +114,7 @@ export default function TradeBotPage({
             <div>
               <h2>Deriv demo bot</h2>
               <p>
-                {botState?.strategy || 'EMA 9/21'} · {activePairLabel} · {activeDuration}-minute Rise/Fall
+                {selectedStrategyName} · {activePairLabel} · {activeDuration}-minute Rise/Fall
               </p>
             </div>
             <div className="botHeaderBadges">
@@ -341,6 +343,7 @@ export default function TradeBotPage({
               ? 'Select a demo account to access the demo bot. Real-account trading is disabled.'
               : 'Select a verified demo account to access the demo bot.'}
           </p>
+          <p className="demoBotCopy">Selected agent strategy: {selectedStrategyName}.</p>
           {!derivSession && (
             <button className="realPrimary" disabled={oauthBusy} onClick={onSignInDeriv}>
               {oauthBusy ? 'Connecting...' : 'Sign in with Deriv'}

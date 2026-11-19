@@ -121,3 +121,25 @@
     @apply bg-background text-foreground;
   }
 }
+
+.realWorkspace .realHeaderActions > button:not(.notifTriggerBtn),
+.realWorkspace .realHero > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-width: 96px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .realWorkspace .realHero {
+    flex-wrap: wrap;
+  }
+
+  .realWorkspace .realHero > button {
+    margin-left: auto;
+  }
+}

@@ -1,0 +1,381 @@
+// PlayGo Trading — Prisma schema (SQLite port of the original PostgreSQL model)
+//
+// FINANCIAL INTEGRITY NOTE
+// ------------------------
+// The original PlayGo directive requires append-only enforcement on
+// `accounting_journals` and `trade_events` at the database role level
+// (REVOKE UPDATE, DELETE, TRUNCATE). SQLite does not support per-role DML
+// grants the way PostgreSQL does. In this Next.js/SQLite port we enforce
+// append-only semantics through a dedicated repository layer
+// (`src/lib/accounting.ts`, `src/lib/audit.ts`) that only ever exposes
+// `create` + `read` operations for these tables, plus an application-level
+// guard that rejects any update/delete attempt. The equivalent PostgreSQL
+// DDL (REVOKE statements + audit triggers) is documented in
+// `docs/DATABASE_ARCHITECTURE.md` for the production migration.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// AUTH & USERS
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         String   @default("USER") // USER | ADMIN
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions         Session[]
+  tradingAccounts  TradingAccount[]
+  auditLogs        AuditLog[]
+  emergencyActions EmergencyStop[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// TRADING ACCOUNTS & BROKER CONNECTIONS
+// ---------------------------------------------------------------------------
+
+model TradingAccount {
+  id             String   @id @default(cuid())
+  userId         String
+  label          String
+  mode           String   @default("PAPER") // PAPER | DEMO | LIVE
+  broker         String   @default("PAPER") // PAPER | DERIV_DEMO | DERIV_LIVE | OANDA_PRACTICE
+  currency       String   @default("USD")
+  // Live trading authorization — fail-closed. Never enabled by a single flag.
+  liveAuthorized Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders         Order[]
+  positions      Position[]
+  journals       AccountingJournal[]
+  riskLimits     RiskLimit[]
+  emergencyStops EmergencyStop[]
+  brokerConns    BrokerConnection[]
+
+  @@index([userId])
+}
+
+model BrokerConnection {
+  id               String    @id @default(cuid())
+  tradingAccountId String
+  broker           String // PAPER | DERIV_DEMO | DERIV_LIVE | OANDA_PRACTICE
+  mode             String // PAPER | DEMO | LIVE
+  status           String    @default("DISCONNECTED") // DISCONNECTED | CONNECTED | AUTHORIZED | REVOKED
+  accountRef       String? // broker-side account identifier (never secrets)
+  permissions      String    @default("READ") // READ | TRADE | WITHDRAW (LIVE requires explicit auth)
+  lastCheckedAt    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  account TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([tradingAccountId])
+}
+
+// ---------------------------------------------------------------------------
+// MARKET DATA
+// ---------------------------------------------------------------------------
+
+model Instrument {
+  id          String   @id @default(cuid())
+  symbol      String   @unique // e.g. EUR/USD, R_100, frxUSDJPY
+  kind        String // FOREX | SYNTHETIC | INDEX
+  base        String?
+  quote       String?
+  pipSize     Decimal  @default(0.0001)
+  minSize     Decimal  @default(0.01)
+  maxSize     Decimal  @default(100)
+  precision   Int      @default(5)
+  description String?
+  createdAt   DateTime @default(now())
+
+  candles   Candle[]
+  orders    Order[]
+  positions Position[]
+}
+
+model Candle {
+  id           String   @id @default(cuid())
+  instrumentId String
+  timeframe    String   @default("M1") // M1 | M5 | M15 | H1 | H4 | D1
+  ts           DateTime
+  open         Decimal
+  high         Decimal
+  low          Decimal
+  close        Decimal
+  volume       Decimal  @default(0)
+  source       String   @default("synthetic") // synthetic | deriv | oanda
+  createdAt    DateTime @default(now())
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@unique([instrumentId, timeframe, ts])
+  @@index([instrumentId, timeframe, ts])
+}
+
+// ---------------------------------------------------------------------------
+// ORDERS & POSITIONS
+// ---------------------------------------------------------------------------
+
+model Order {
+  id               String   @id @default(cuid())
+  tradingAccountId String
+  instrumentId     String
+  clientOrderId    String   @unique // idempotency key
+  side             String // BUY | SELL
+  type             String // MARKET | LIMIT | STOP
+  size             Decimal
+  price            Decimal?
+  stopLoss         Decimal?
+  takeProfit       Decimal?
+  status           String   @default("CREATED")
+  // CREATED | VALIDATED | RISK_APPROVED | SUBMITTED | ACCEPTED
+  // | PARTIALLY_FILLED | FILLED | CANCELLED | REJECTED
+  filledSize       Decimal  @default(0)
+  avgFillPrice     Decimal?
+  commission       Decimal  @default(0)
+  swap             Decimal  @default(0)
+  slippage         Decimal  @default(0)
+  rejectReason     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  account    TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  instrument Instrument     @relation(fields: [instrumentId], references: [id])
+  events     TradeEvent[]
+  positionId String?
+
+  @@index([tradingAccountId])
+  @@index([status])
+}
+
+model Position {
+  id               String    @id @default(cuid())
+  tradingAccountId String
+  instrumentId     String
+  side             String // BUY | SELL
+  size             Decimal
+  entryPrice       Decimal
+  currentPrice     Decimal
+  stopLoss         Decimal?
+  takeProfit       Decimal?
+  unrealizedPnl    Decimal   @default(0)
+  realizedPnl      Decimal   @default(0)
+  swap             Decimal   @default(0)
+  commission       Decimal   @default(0)
+  status           String    @default("OPEN") // OPEN | CLOSED
+  openedAt         DateTime  @default(now())
+  closedAt         DateTime?
+
+  account    TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  instrument Instrument     @relation(fields: [instrumentId], references: [id])
+
+  @@index([tradingAccountId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// ACCOUNTING — APPEND-ONLY
+// ---------------------------------------------------------------------------
+
+model AccountingJournal {
+  id               String   @id @default(cuid())
+  tradingAccountId String
+  ref              String   @unique // idempotency / external reference
+  type             String // OPENING_CAPITAL | TRADE | FEE | COMMISSION | SWAP | DEPOSIT | WITHDRAWAL | ADJUSTMENT | REALIZED_PNL | UNREALIZED_PNL
+  description      String
+  // Integrity hash: sha256(journalId + type + sum(entries)) — verified on read.
+  integrityHash    String?
+  createdAt        DateTime @default(now())
+
+  account TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  entries LedgerEntry[]
+
+  @@index([tradingAccountId])
+}
+
+// Double-entry ledger. Every journal MUST balance: sum(debit) === sum(credit).
+model LedgerEntry {
+  id          String   @id @default(cuid())
+  journalId   String
+  accountType String // CASH | CAPITAL | EQUITY | REALIZED_PNL | UNREALIZED_PNL | FEES | COMMISSION | SWAP | CLIENT_LIABILITY
+  debit       Decimal  @default(0)
+  credit      Decimal  @default(0)
+  currency    String   @default("USD")
+  createdAt   DateTime @default(now())
+
+  journal AccountingJournal @relation(fields: [journalId], references: [id], onDelete: Restrict)
+
+  @@index([journalId])
+  @@index([accountType])
+}
+
+// Trade event log — append-only order lifecycle audit.
+model TradeEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  type      String // CREATED | VALIDATED | RISK_APPROVED | SUBMITTED | ACCEPTED | FILLED | PARTIALLY_FILLED | CANCELLED | REJECTED | CLOSED
+  payload   String // JSON string of the event detail
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+// ---------------------------------------------------------------------------
+// STRATEGY RESEARCH
+// ---------------------------------------------------------------------------
+
+model Strategy {
+  id             String   @id @default(cuid())
+  name           String
+  version        Int      @default(1)
+  description    String?
+  entryRules     String // JSON
+  exitRules      String // JSON
+  positionSizing String // JSON
+  instruments    String // comma-separated symbols
+  timeframes     String // comma-separated
+  maxDrawdownPct Decimal  @default(20)
+  status         String   @default("DRAFT") // DRAFT | VALIDATED | APPROVED | RETIRED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  backtests Backtest[]
+}
+
+model Backtest {
+  id         String   @id @default(cuid())
+  strategyId String
+  instrument String
+  timeframe  String
+  fromDate   DateTime
+  toDate     DateTime
+  params     String // JSON
+  resultJson String // JSON metrics: netReturn, maxDrawdown, sharpe, sortino, calmar, winRate, profitFactor, expectancy, trades
+  createdAt  DateTime @default(now())
+
+  strategy Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId])
+}
+
+// ---------------------------------------------------------------------------
+// RISK MANAGEMENT
+// ---------------------------------------------------------------------------
+
+model RiskLimit {
+  id                       String   @id @default(cuid())
+  tradingAccountId         String
+  version                  Int      @default(1)
+  maxPositionSize          Decimal  @default(10)
+  maxLeverage              Decimal  @default(30)
+  maxDailyLossPct          Decimal  @default(5)
+  maxWeeklyLossPct         Decimal  @default(10)
+  maxDrawdownPct           Decimal  @default(20)
+  maxAggregateExposure     Decimal  @default(50000)
+  maxSimultaneousPositions Int      @default(10)
+  maxSpreadPips            Decimal  @default(5)
+  maxSlippagePips          Decimal  @default(3)
+  active                   Boolean  @default(true)
+  createdAt                DateTime @default(now())
+
+  account TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([tradingAccountId])
+}
+
+model EmergencyStop {
+  id               String    @id @default(cuid())
+  tradingAccountId String
+  active           Boolean   @default(false)
+  reason           String?
+  activatedAt      DateTime?
+  deactivatedAt    DateTime?
+  activatedBy      String? // userId
+  createdAt        DateTime  @default(now())
+
+  account TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  user    User?          @relation(fields: [activatedBy], references: [id])
+
+  @@index([tradingAccountId])
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT & OPERATIONS
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String // LOGIN | LOGOUT | ORDER_CREATE | EMERGENCY_STOP_ACTIVATE | RISK_LIMIT_UPDATE | BROKER_CONNECT | ...
+  entity    String?
+  entityId  String?
+  before    String? // JSON snapshot
+  after     String? // JSON snapshot
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+}
+
+model SystemHealth {
+  id        String   @id @default(cuid())
+  component String // api | database | paper_engine | market_data | accounting | risk | broker
+  status    String // OK | DEGRADED | DOWN
+  message   String?
+  checkedAt DateTime @default(now())
+
+  @@index([component])
+}
+
+// Daily reconciliation record (paper/demo). One per (account, calendar day).
+// Idempotent: re-running on the same day upserts the same row rather than
+// creating duplicates. These rows are real observations recorded on the
+// actual day they were computed — never back-filled with simulated timestamps.
+model Reconciliation {
+  id                String   @id @default(cuid())
+  tradingAccountId  String
+  date              DateTime
+  internalBalance   Decimal
+  brokerBalance     Decimal?
+  internalPositions Int
+  brokerPositions   Int?
+  discrepancies     String? // JSON
+  status            String   @default("CLEAN") // CLEAN | DISCREPANCY | BLOCKED
+  phase             String   @default("A") // A (paper) | B (demo)
+  createdAt         DateTime @default(now())
+
+  @@unique([tradingAccountId, date])
+  @@index([tradingAccountId])
+  @@index([phase])
+}
